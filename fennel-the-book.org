@@ -1,0 +1,501 @@
+#+TITLE: Fennel - The Book
+#+OPTIONS: html-style:nil num:nil
+#+BIND: org-html-table-default-attributes (:border "0" :frame "void")
+#+HTML_HEAD: <link rel="stylesheet" type="text/css" href="fennel-the-book.css" />
+#+HTML_HEAD_EXTRA: 
+
+* Introduction
+This book is intended to be a complete reimplementation of [[https://fennel-lang.org][Fennel]],
+along with associated tooling that reuses the compiler
+infrastructure. It was developed by adapting the [[https://github.com/bakpakin/fennel][original Fennel
+compiler]]. I could not have written any of this without basing it on
+the work others have put into creating and maintaining the Fennel
+language.
+
+** How to read this book
+This book is also a program! It is written using the [[https://en.wikipedia.org/wiki/Literate_programming][literate
+programming]] style, which means that the source code you read in this
+book is /also/ the source code of the program the book is about.
+
+When a code block is /not/ part of the compiler's source code, it will
+have a comment at the beginning saying so. It will look like this:
+
+#+BEGIN_SRC fennel
+;; Example - not a part of the source code!
+#+END_SRC
+
+The compiler is a single Fennel file. When a code block is part of a
+different file, it will have a comment at the beginning stating so.
+
+Note also that the source code blocks in this book are arranged for
+the purpose of reading, and do not necessarily appear in the same
+order in the source code itself. For instance, much of the preamble of
+the compiler is left until the end, since it's largely miscellaneous
+boilerplate that doesn't contribute to an understanding of the code.
+
+** What is Fennel?
+Fennel is a language that compiles to [[https://www.lua.org/][Lua]]. It is a member of the Lisp
+family of languages. The Fennel compiler is a Lua program, either
+written by hand in Lua (the original Fennel compiler) or compiled to
+Lua from Fennel code (this book's compiler). When you run a Fennel
+program, it is first compiled into Lua code and then run by the Lua
+interpreter. Running Fennel from the command line once you have it
+installed looks like this:
+
+#+BEGIN_SRC bash :exports both :results output
+# Example - not a part of the source code!
+fennel --eval "
+(var sum-of-indices 0)
+(each [i char (ipairs [:a :b :c])]
+  (set sum-of-indices (+ sum-of-indices i))
+  (: io.stdout :write (.. char i :! \" \" )))
+(print)
+sum-of-indices"
+#+END_SRC
+
+#+RESULTS:
+
+You can also compile code to Lua separately, and then run it with a
+Lua compiler, e.g.:
+
+#+BEGIN_SRC bash :exports both :results output
+# Example - not a part of the source code!
+echo "(comment \"compiled fennel file\") (print (+ 1 1))" \
+  | fennel --compile /dev/stdin > precompiled-fennel.fnl
+cat precompiled-fennel.fnl
+echo ""
+lua precompiled-fennel.fnl
+#+END_SRC
+
+#+RESULTS:
+: -- compiled fennel file
+: return print((1 + 1))
+: 
+: 2
+
+** TODO Self-hosting
+The compiler implemented in this book cannot compile itself yet. In
+fact, it's not even a compiler yet! In order to run what /is/
+implemented in the book, you'll need to download the Fennel compiler
+and put it on your ~$PATH~ as ~fennel~.
+
+*** TODO explain ~$PATH~ and Fennel installation :noexport:
+
+** TODO Real credits :noexport:
+/Replace the vague credit in the intro with real credits section including Fennel contributors/
+
+** DONE Get ~fennel --eval~ upstreamed                              :noexport:
+* TODO A Dash of Fennel
+* Streams
+A construct we'll use frequently throughout the book is the
+/stream/. Streams are a method of processing data lazily. The output of
+a Lua iterator is a stream, but we can also create streams manually if
+we want. There are two kinds of streams we use, corresponding to the
+two kinds of iterators in Lua:
+
+** Stateful Streams
+
+Stateful/ streams capture the state of the stream within a closure
+(or a coroutine). They are called with no arguments, and return the
+next element of the stream each time they are called.
+
+Here's a function which creates a stateless stream that returns each
+byte in a string successively:
+
+#+BEGIN_SRC fennel :noweb-ref string-stream :results output
+(fn string-stream [str]
+  (var index 1)
+  #(let [r (: str :byte index)]
+     (set index (+ index 1))
+     r))
+
+(each [byte (string-stream "abc")]
+  (print byte (string.char byte)))
+#+END_SRC
+
+#+RESULTS:
+: 97	a
+: 98	b
+: 99	c
+
+** Stateless Streams
+
+- /Stateless/ streams have their state passed in using two arguments:
+  the /invariant state/ and the /variant state/. The invariant state
+  is passed in as the first argument to each iteration of the stream. 
+
+  ~ipairs~, for instance, returns a stateless stream. Its invariant
+  state is the table that is being iterated over, and its variant
+  state is the previously-seen index (starting at 0). This is
+  demonstrated in the following example:
+  
+#+BEGIN_SRC fennel :results output
+;; Example - not a part of the source code!
+(local fennelview #((require :fennelview) $ {:one-line true}))
+(local letters [:a :b :c])
+
+;; the invariant state is the array, and the variant state is the
+;; last index (starting at 0)
+(let [(stream arr initial-i) (ipairs letters)]
+  ;; Iterate the stream manually
+  (local (new-i value) (stream arr initial-i))
+  (print (fennelview {: arr :i initial-i : new-i : value}))
+
+  ;; Iterate the stream with a different table and index
+  ;; statelessness
+  (local another-arr [:d :e :f])
+  (local (another-new-i another-value) (stream another-arr 2))
+  (print (fennelview {:arr another-arr :i 2 :new-i another-new-i :value another-value})))
+#+END_SRC
+
+#+RESULTS:
+: {:arr ["a" "b" "c"] :i 0 :new-i 1 :value "a"}
+: {:arr ["d" "e" "f"] :i 2 :new-i 3 :value "f"}
+  
+As you can see, 
+
+Most of our streams are quite simple - they are functions
+which, each time they are called, return the next item. They use
+closures to capture the state of the stream.  If you're familiar with
+Lua iterators, streams are the function output by a stateful iterator
+
+** Intro to Streams: ~string-stream~
+As both an example and a helper function for later use, let's define a
+function that creates a stream from a string:
+
+#+BEGIN_SRC fennel :noweb-ref string-stream
+(fn string-stream [str]
+  (var index 1)
+  #(let [r (: str :byte index)]
+     (set index (+ index 1))
+     r))
+#+END_SRC
+
+We return an anonymous function which closes over ~str~ and ~index~,
+maintaing the state in the function itself. Each time it is called, it
+will return the next byte in the string.
+
+One handy feature of this design is that these streams are also
+iterators! For instance, using ~string-stream~ we can print the bytes of
+a string with the following code:
+
+#+BEGIN_SRC fennel :exports both :noweb yes
+;; EXAMPLE - not a part of the source code!
+(local {: string-stream} (. (require :fennel-the-book) :streams))
+(each [byte (string-stream "abc")]
+  (: io.stdout :write (.. byte " ")))
+#+END_SRC
+
+#+RESULTS:
+: 97 98 99 
+
+** Buffering streams with ~get-stream-cursor~
+The tokenizer we will implement in the next chapter will be using the
+~string-stream~ we just defined to stream the bytes of the code it's
+digesting. However, the stream we've defined can be awkward to use -
+without keeping track of things manually we can't check bytes ahead of
+the stream's current position without advancing the stream. This gets
+quite messy to deal with, since you can't just pass the stream to a
+function if you might need to send buffered data or both instead.
+
+To remedy this, we'll define a simple abstraction over a stream called
+a ~cursor~. The cursor is a table with two main functions that provide
+access to the values in the stream - ~take~ and ~peek~.
+
+~cursor.take~ is itself a stream - if you create a cursor that wraps a
+stream and iterate over ~cursor.take~, you will get exactly the same
+values as if you iterated over the original stream.
+
+~cursor.peek~, on the other hand, lets you look at the upcoming values
+of ~cursor.take~. It does so by calling the original stream and then
+storing the value it returns in a buffer. When ~cursor.take~ is called,
+it returns any values in the buffer before returning values from the
+original stream.
+
+#+BEGIN_SRC fennel :noweb-ref create-cursor
+(fn create-cursor [stream invariant-state ]
+  ;; We track the current position and the end of the buffer. The
+  ;; indices of the buffer items will always be between these two
+  ;; numbers. Since we don't move the buffer elements back to the
+  ;; beginning at any point, these will increase monotonically.
+  (var position 0)
+  (var buffer-end 0)
+  (let [;; This is the buffer to store values that were retrieved
+        ;; ahead of the cursor position
+        buffer []
+        buffer-length #(- buffer-end position)
+        buffer-get #(. buffer (+ position $))
+        buffer-set #(tset buffer (+ position $1) $2)
+        buffer-push
+        #(let [buf-end (+ buffer-end 1)]
+           (tset buffer buf-end $)
+           (set buffer-end buf-end))
+        buffer-load-and-get
+        #(if (> $ (buffer-length))
+             (let [new-item (stream)]
+               (buffer-push new-item)
+               new-item)
+             (let [old-item (buffer-get $)]
+               old-item))
+
+        ;; Tail recursive peek-at lets us peek ahead multiple values
+        ;; without allocating a table each time
+        peek-at
+        (fn [i remaining]
+          (if
+           ;; Base case - return the remaining item
+           (or (not remaining) (= remaining 1))
+           (buffer-load-and-get i)
+
+           ;; Otherwise, return the item at i and recursively iterate
+           ;; until we've returned all the requested values
+           (values (buffer-load-and-get i)
+                   (peek-at (+ i 1) (- remaining 1)))))
+        peek #(peek-at 1 (or $1 1))
+
+        take
+        #(if (> (buffer-length) 0)
+             (let [item (buffer-get 1)]
+               (buffer-set 1 nil)
+               (set position (+ position 1))
+               item)
+             (do (set position (+ position 1))
+                 (set buffer-end (+ buffer-end 1))
+                 (stream)))]
+    {: peek : take}))
+#+END_SRC
+
+To demonstrate how this can be useful, let's try out our cursor with
+some sample code:
+
+#+BEGIN_SRC fennel :exports both :results output org drawer
+;; Example - not a part of the source code!
+(let [{: print-table} (require :org-table-helpers)
+      {:streams {: string-stream : create-cursor}} (require :fennel-the-book)
+      unpack (or unpack table.unpack) {: insert : concat} table
+      stream (string-stream "abcdef")
+      cursor (create-cursor stream)
+      rows []]
+
+  ;; Advance the stream of bytes by iterating over cursor.take
+  (each [byte cursor.take]
+    ;; Check the next byte after the cursor, then the next two bytes
+    (let [peek-1-byte (cursor.peek)
+          peek-2-bytes [(cursor.peek 2)]]
+      (insert rows [[byte] [peek-1-byte] peek-2-bytes])))
+
+  ;; Add an additional column of decoded characters for each column of bytes
+  (each [i row (ipairs rows)]
+    (local new-row [])
+    (each [j bytes (ipairs row)]
+      (each [_ byte (ipairs bytes)] (insert new-row byte))
+      (when (and (= j 3) (< (length bytes) 2)) (insert new-row ""))
+      (when (> (length bytes) 0)
+        (insert new-row (string.char (unpack bytes)))))
+    (tset rows i new-row))
+
+  (print-table
+   rows {:column-headers [:Current "" "Peek 1" "" "Peek 2"]
+         :column-groups [:/ :> :< :> :< "" :>]
+         }))
+#+END_SRC
+
+#+RESULTS:
+:results:
+| Current |   | Peek 1 |   | Peek 2 |     |    |
+|---------+---+--------+---+--------+-----+----|
+|       / | > |      < | > |      < |     | >  |
+|      97 | a |     98 | b |     98 |  99 | bc |
+|      98 | b |     99 | c |     99 | 100 | cd |
+|      99 | c |    100 | d |    100 | 101 | de |
+|     100 | d |    101 | e |    101 | 102 | ef |
+|     101 | e |    102 | f |    102 |     | f  |
+|     102 | f |        |   |        |     |    |
+:end:
+
+As you can see, the ~(cursor.peek)~ expression does not affect the
+subsequent ~(cursor.peek 2)~ expression - the values only advance when
+~cursor.take~ is called in the iterator.
+
+** TODO Multistreams :noexport:
+* Tokenizing
+The first step towards compiling code is tokenizing. Our tokenizer
+takes a stream of bytes and transforms it into a stream of /tokens/. A
+token is a representation of a single element of the language. Tokens
+are /not/ nested - for instance, we don't have a ~list~ token type, but
+rather ~opener~ and ~closer~ token types to indicate when a list begins
+and ends.
+
+The grammar 
+
+The total list of token types is as follows:
+
+- String literals - e.g., ~"example"~
+- Number literals - e.g., ~3.456e-7~
+- Symbols - e.g., ~example~
+- Keyword strings - e.g., ~:example~
+- Openers - ~(~, ~[~, or ~{~
+- Closers - ~)~, ~]~, or ~}~
+- Prefix characters - ~'~, ~`~, ~,~, and ~#~
+- Whitespace and comments
+
+Whitespace tokens are mostly ignored by the parser, and comment tokens
+are completely ignored, but we tokenize them anyway so that the
+tokenizer can be re-used by other tooling, like a formatter for Fennel
+code.
+
+Since the number of token types is fixed and small, it's fairly
+convenient to use integers instead of strings to represent the token
+types, using a convenience table that stores a mapping of string names
+to number values and predicate functions that let us check the type
+readably without converting to a string:
+
+#+BEGIN_SRC fennel :noweb-ref token-types
+(local token-types
+       ;; create the table with a mapping of ints to strings
+       (let [tts [:string :number :symbol :kw-string
+                  :opener :closer :prefix :whitespace :comment]]
+         (each [k v (ipairs tts)]
+           ;; token-types.TYPE will return the int
+           (tset tts v k)
+           ;; token-types.TYPE? will check if the argument equals that type
+           (tset tts (.. v :?) #(= $ k)))
+         tts))
+#+END_SRC
+
+* Tools
+** ~fawk~
+#+BEGIN_SRC fennel :noweb tangle :tangle fawk.fnl
+(local fs "\n")
+#+END_SRC
+
+* Misc.
+** Hashbang
+To allow the file to be run as an executable on Linux, we add a
+hashbang to the first line. As noted above, the tokenizer treats this
+line as a comment if it is the very first thing in the file.
+
+#+BEGIN_SRC fennel :noweb-ref hashbang
+#!/usr/bin/env fennel
+#+END_SRC
+
+** Utils
+
+** Org table helper
+#+BEGIN_SRC fennel :tangle org-table-helpers.fnl
+;; Exported to org-table-helpers.fnl
+
+(local fennelview (require :fennelview))
+
+(fn fast-push [t v]
+  (set t.__count (+ (or t.__count 0) 1))
+  (tset t t.__count v))
+
+(fn fast-length [t] (or t.__count (length t)))
+
+(fn make-table [rows options]
+  (let [{: column-headers : column-groups} (or options {})
+        column-headers-row
+        (and column-headers (= :table (type column-headers))
+             column-headers)
+        column-widths []
+        processed-rows []
+        hlines-after {}
+        chunks []]
+    
+    (var table-cell-width 0)
+
+    (when column-headers-row (table.insert rows 1 column-headers-row))
+    (when column-groups (table.insert rows 2 column-groups))
+
+    ;; collect table widths and convert cells to strings
+    (each [row-i row (ipairs rows)]
+      (local processed-cells [])
+      (each [cell-i cell (ipairs row)]
+        (let [val (if (= :string (type cell)) cell
+                      (fennelview cell {:one-line true}))
+              val-width (length val)]
+
+          ;; update column width if it's smaller than the current cell
+          (when (> val-width (or (. column-widths cell-i) 0))
+            (tset column-widths cell-i val-width))
+          
+          ;; update table cell width
+          (when (> cell-i table-cell-width) (set table-cell-width cell-i))
+          (fast-push processed-cells val)))
+      (fast-push processed-rows processed-cells))
+    
+    (local table-cell-height (fast-length processed-rows))
+    
+    ;; print the cells to the chunks table
+    (each [row-i row (ipairs processed-rows)]
+      (fast-push chunks "|") ;; left border
+      (for [cell-i 1 table-cell-width]
+        (let [cell (or (. row cell-i) "")
+              cell-width (length cell)]
+          (fast-push chunks " ")
+          (fast-push chunks cell)
+          (local right-cell-padding
+                 (math.max 0 (- (. column-widths cell-i) cell-width)))
+          (local right-padding (+ 1 right-cell-padding))
+          (fast-push chunks (string.rep " " right-padding))
+          (fast-push chunks "|") ;; right border
+          ))
+      (when (not= row-i table-cell-height)
+        (fast-push chunks "\n"))
+      (when (and column-headers (= row-i 1))
+        (fast-push chunks "|")
+        (each [column-i width (ipairs column-widths)]
+          (fast-push chunks (string.rep "-" (+ width 2)))
+          (fast-push chunks (if (= column-i table-cell-width) "|" "+")))
+        (fast-push chunks "\n")))
+
+    (table.concat chunks)))
+
+{: make-table :print-table (fn [...] (print (make-table ...)))}
+#+END_SRC
+
+*** COMMENT Old value-based org table helper
+#+BEGIN_SRC fennel
+(fn org-table-helper [rows options]
+  (let [fennelview (require :fennelview)
+        processed-rows []
+        {: headers} (or options {})]
+    (each [i row (ipairs rows)]
+      (local processed-row 
+             (if (= (type row) :table)
+                 (let [processed-cells []]
+                   (each [i cell (ipairs row)]
+                     (table.insert
+                      processed-cells
+                      (if (= :number (type cell))
+                          (= :table (type cell)) (.. "\"" (fennelview cell {:one-line true}) "\"")
+                          (fennelview cell {:one-line true}))))
+                   (.. "(" (table.concat processed-cells " ") ")"))
+                 row))
+      (table.insert processed-rows processed-row)
+      (when (and (= i 1) headers)
+        (table.insert processed-rows "hline")))
+    (.. "(" (table.concat processed-rows " ") ")")))
+#+END_SRC
+
+** Utils
+#+BEGIN_SRC fennel :tangle utils.fnl
+
+#+END_SRC
+
+** Tests
+*** TODO Set up tests :noexport:
+
+* Output :noexport:
+#+BEGIN_SRC fennel :noweb tangle :tangle fennel-the-book.fnl
+<<hashbang>>
+
+<<string-stream>>
+
+<<create-cursor>>
+
+<<token-types>>
+
+{:streams {: string-stream : create-cursor} : token-types}
+#+END_SRC
