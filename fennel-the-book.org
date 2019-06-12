@@ -86,18 +86,18 @@ and put it on your ~$PATH~ as ~fennel~.
 
 ** DONE Get ~fennel --eval~ upstreamed                              :noexport:
 * TODO A Dash of Fennel
-* Streams
-A construct we'll use frequently throughout the book is the
-/stream/. Streams are a method of processing data lazily. The output of
-a Lua iterator is a stream, but we can also create streams manually if
-we want. There are two kinds of streams we use, corresponding to the
-two kinds of iterators in Lua:
+* Iterators and Streams
+A construct we'll use frequently throughout the book is the /stream/.
+Streams are a method of processing data lazily. The output of a Lua
+iterator is a stream, but we can also create streams manually if we
+want. There are two kinds of streams we use, corresponding to the two
+kinds of iterators in Lua:
 
 ** Stateful Streams
 
-Stateful/ streams capture the state of the stream within a closure
-(or a coroutine). They are called with no arguments, and return the
-next element of the stream each time they are called.
+Stateful/ streams capture the state of the stream within a closure (or
+a coroutine). They are called with no arguments, and return the next
+element of the stream each time they are called.
 
 Here's a function which creates a stateless stream that returns each
 byte in a string successively:
@@ -120,15 +120,17 @@ byte in a string successively:
 
 ** Stateless Streams
 
-- /Stateless/ streams have their state passed in using two arguments:
-  the /invariant state/ and the /variant state/. The invariant state
-  is passed in as the first argument to each iteration of the stream. 
+/Stateless/ streams have their state passed in using two arguments:
+the /invariant state/ and the /variant state/. Each time the stream
+is called, it must be passed the two state values as arguments. The
+stream should then return two values: the new variant state and the
+streamed value.
 
-  ~ipairs~, for instance, returns a stateless stream. Its invariant
-  state is the table that is being iterated over, and its variant
-  state is the previously-seen index (starting at 0). This is
-  demonstrated in the following example:
-  
+To illustrate this more concretely, let's take a look at the iterator
+~ipairs~, which returns a stateless stream. In ~ipairs~' case, the
+invariant state is the table containing the elements, and the variant
+state is the current index of the stream.
+
 #+BEGIN_SRC fennel :results output
 ;; Example - not a part of the source code!
 (local fennelview #((require :fennelview) $ {:one-line true}))
@@ -149,15 +151,6 @@ byte in a string successively:
 #+END_SRC
 
 #+RESULTS:
-: {:arr ["a" "b" "c"] :i 0 :new-i 1 :value "a"}
-: {:arr ["d" "e" "f"] :i 2 :new-i 3 :value "f"}
-  
-As you can see, 
-
-Most of our streams are quite simple - they are functions
-which, each time they are called, return the next item. They use
-closures to capture the state of the stream.  If you're familiar with
-Lua iterators, streams are the function output by a stateful iterator
 
 ** Intro to Streams: ~string-stream~
 As both an example and a helper function for later use, let's define a
