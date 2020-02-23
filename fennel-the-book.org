@@ -9,7 +9,7 @@
 #+HTML_HEAD: <link rel="stylesheet" type="text/css" href="fennel-the-book.css" />
 #+HTML_HEAD: <script type="text/javascript" src="fengari-web.js"></script>
 #+HTML_HEAD: <script type="application/lua" src="fennel-the-book-html-script.lua" async></script>
-#+HTML_HEAD_EXTRA: 
+#+HTML_HEAD_EXTRA:
 
 * Introduction
 This book is intended to be a complete reimplementation of [[https://fennel-lang.org][Fennel]],
@@ -79,9 +79,11 @@ printf "output:   $(lua compiled.lua)"
 #+BEGIN_SRC fennel :tangle test.fnl
 ((require :busted.runner))
 
-(local describe describe)
-(local assert assert)
-(local it it)
+(global describe describe)
+(global assert assert)
+(global it it)
+
+(global unpack (or unpack table.unpack))
 #+END_SRC
 
 ** TODO COMMENT Self-hosting
@@ -171,14 +173,14 @@ state is the current index of the stream.
       ;; the invariant state is the array, and the variant state is
       ;; the last index (starting at 0)
       (stream arr initial-i) (ipairs letters)]
- 
+
   ;; Manually iterate the stream
   (var i initial-i)
   (while i
     (let [(new-i value) (stream arr i)]
       (set i new-i)
       (print (fennelview {: arr : i : value}))))
-  
+
   ;; Manually iterate the stream once with a different table and index
   (let [arr [:d :e :f]
         initial-i 1
@@ -240,7 +242,7 @@ lists or arrays, and we can use the same terminology:
   arbitrary relationship to the elements output by the original
   stream - one-to-one, many-to-one, one-to-many, or a mixture of
   these.
-  
+
 These operations match many of the operations we need to perform in
 the compiler:
 
@@ -297,21 +299,22 @@ original stream.
            (tset buffer new-buffer-end $)
            (set buffer-end new-buffer-end))
         buffer-load-and-get
-        #(if (= $ (+ 1 (buffer-length)))
-             (let [new-item (stream)]
-               (buffer-push new-item)
-               new-item)
-             (> $ (buffer-length))
-             (let [new-item (stream)]
-               (buffer-push new-item)
-               (buffer-load-and-get $))
-             (let [old-item (buffer-get $)]
-               old-item))
+        (fn buffer-load-and-get [i]
+          (if (= i (+ 1 (buffer-length)))
+              (let [new-item (stream)]
+                (buffer-push new-item)
+                new-item)
+              (> i (buffer-length))
+              (let [new-item (stream)]
+                (buffer-push new-item)
+                (buffer-load-and-get i))
+              (let [old-item (buffer-get i)]
+                old-item)))
 
         ;; Tail recursive peek-at lets us peek ahead multiple values
         ;; without allocating a table each time
         peek-at
-        (fn [i remaining]
+        (fn peek-at [i remaining]
           (if
            ;; Base case - return the remaining item
            (or (not remaining) (= remaining 1))
@@ -339,10 +342,11 @@ some sample code:
 
 #+BEGIN_SRC fennel :exports both :results output org drawer
 ;; Example - not a part of the source code!
+(global unpack (or unpack table.unpack))
 (let [{: print-table} (require :org-table-helpers)
       {:streams {: stateful-string-stream
                  : create-cursor}} (require :fennel-the-book)
-      unpack (or unpack table.unpack) {: insert : concat} table
+      {: insert : concat} table
       stream (stateful-string-stream "abcdef")
       cursor (create-cursor stream)
       rows []]
@@ -391,10 +395,9 @@ subsequent ~(cursor.peek 2)~ expression - the values only advance when
 The first step towards compiling code is /tokenizing/. Tokenizing is the
 process of taking the source format of the language - in our case, a
 UTF-8 string - and turning it into /tokens/. Tokens are the individual
-instances of the basic elements of a languages grammar. Tokens are
-not/ nested - for instance, we don't have a ~list~ token type, but
-rather ~opener~ and ~closer~ token types to indicate when a list begins
-and ends.
+instances of the basic elements of a languages grammar. Tokens are /not/
+nested - for instance, we don't have a ~list~ token type, but rather
+~opener~ and ~closer~ token types to indicate when a list begins and ends.
 
 Each token is tagged with a /token type./ There is a finite number of
 token types, as follows:
@@ -416,15 +419,16 @@ tokenizer can be re-used by other tooling, like a formatter for Fennel
 code.
 
 Since the number of token types is fixed and small, it's convenient to
-use integers instead of strings to represent the token types, using a
-convenience table that stores a mapping of string names to number
-values and predicate functions that let us check the type readably
-without converting to a string:
+use integers instead of strings to represent the token types. To do
+so, we use a table that stores a mapping of string names to their
+corresponding number values and predicate functions. The predicate
+functions let us check the type readably without first converting the
+number to a string:
 
 #+BEGIN_SRC fennel :noweb-ref enum
+(global unpack (or unpack table.unpack))
 (macro enum [...]
-  (let [unpack (or unpack table.unpack)
-        cases [...]
+  (let [cases [...]
         stringed-cases []]
 
     (each [i case (ipairs cases)]
@@ -433,7 +437,7 @@ without converting to a string:
         ;; (tset kv-pairs (+ adjusted-i 1) [stringed-case i])
         ;; (tset kv-pairs (+ adjusted-i 2) [(.. stringed-case :?) `#(= $ ,i)])
         (tset stringed-cases i (tostring case))))
-    
+
     `(let [this-enum# [,(unpack stringed-cases)]]
        (each [k# v# (ipairs this-enum#)]
          ;; this-enum.CASE will return the int
@@ -451,10 +455,10 @@ without converting to a string:
 #+END_SRC
 
 ** TODO COMMENT Intro to state machines
-** TODO State machine macro based on enum and match
+** TODO COMMENT State machine macro based on enum and match
 
 - Generates a function of ~(state ... args) -> (newState ... returns)~
-- 
+-
 
 #+BEGIN_SRC fennel :tangle test-state-machine.fnl
 ((require :busted.runner))
@@ -463,10 +467,11 @@ without converting to a string:
 (local assert assert)
 (local it it)
 
+(require-macros :state-machine)
+
 (describe
  "state-machine"
  #(do
-    (require-macros :state-machine)
     (let [(str-reader-machine str-reader-states)
           (state-machine
 
@@ -510,7 +515,7 @@ without converting to a string:
 
            ;; Condition blocks
            ;;
-           ;; Each condition bloc has three parts:
+           ;; Each condition block has three parts:
            ;;
            ;; - Previous state
            ;;
@@ -534,9 +539,9 @@ without converting to a string:
 #+END_SRC
 
 #+BEGIN_SRC fennel :tangle state-machine.fnl
+(global unpack (or unpack table.unpack))
 (fn enum [...]
-  (let [unpack (or unpack table.unpack)
-        cases [...]
+  (let [cases [...]
         stringed-cases []]
 
     (each [i case (ipairs cases)]
@@ -545,7 +550,7 @@ without converting to a string:
         ;; (tset kv-pairs (+ adjusted-i 1) [stringed-case i])
         ;; (tset kv-pairs (+ adjusted-i 2) [(.. stringed-case :?) `#(= $ ,i)])
         (tset stringed-cases i (tostring case))))
-    
+
     `(let [this-enum# [,(unpack stringed-cases)]]
        (each [k# v# (ipairs this-enum#)]
          ;; this-enum.CASE will return the int
@@ -562,48 +567,70 @@ without converting to a string:
           (tset evens (/ i 2) val)))
     (values odds evens)))
 
-;; (fn condition-transition-pair [condition transition]
-;;   (let [t (type transition)]
-;;     (when (not (or (= t :string) (sym? t)))
-;;       (error "")))
-  
-;;   (let [err-cond? (= :string (type transition))
-;;         err-message (if err-cond? transition "")]
-;;     ))
+(fn expand-condition-transition-pair [condition transition]
+  (let [t (type transition)]
+    (when (not (or (= t :string) (sym? t)))
+      (error "expected result to be either an error string or a state symbol")))
 
-;; (fn transitions-from-state [state ...]
-;;   )
+  (let [err-cond? (= :string (type transition))
+        err-message (if err-cond? transition "")
+        final-condition (if (and (sym? condition) (= :_ (tostring condition))) (sym :true)
+                            condition)]
+    ))
+
+(fn expand-condition-block-with-states-and-transitions [states transitions previous condition-block]
+  (let [form `(if)
+        form-i (length form)
+        [from-state] condition-block]
+    (for [i 2 (length condition-block)])))
+
+(fn map-values [fun item ...]
+  (when (not= item nil)
+    (values (fun item) (map-values fun ...))))
 
 (fn state-machine [spec options args ...]
   (let [options
         (if (or (not= (type options) :table) (sequence? options))
-            (error "state-machine options must be a table literal")
+            (error "state-machine options must be a sequence literal")
             options)
+
         (initial-state-syms default-state-sym)
         (let [o options]
-          (if (and o.initial-state o.initial-states) (error "both initial-state and initial-states are set")
-              (and o.initial-state o.default-state) (error "both initial-state and default-state are set")
+          (if (and o.initial-state o.initial-states)
+              (error "both initial-state and initial-states are set")
+
+              (and o.initial-state o.default-state)
+              (error "both initial-state and default-state are set")
+
               o.initial-states (values o.initial-states o.default-state)
               o.initial-state (values [o.initial-state] o.initial-state)))
+
         transition-forms [...]
         (state-syms allowed-transition-lists) (split-alternating spec)
-        states ,(enum (unpack state-syms))]
-
-    (print ((require :fennelview) states))
+        states (eval-ast (enum (unpack state-syms)))
+        transitions {}
+        condition-blocks [...]
+        expand-condition-block
+        (partial expand-condition-block-with-states-and-transitions states transitions)
+        expand-condition-blocks (partial map-values expand-condition-block)]
 
     (each [i state-sym (ipairs state-syms)]
       (let [allowed-transition-list (. allowed-transition-lists i)]
-        (tset states (tostring state-sym) {:allowed-transitions allowed-transition-list})))
+        (tset transitions (tostring state-sym) allowed-transition-list)))
 
     (each [i state-sym (ipairs state-syms)]
       (let [allowed-transition-list (. allowed-transition-lists i)]
         (each [j to-state-sym (ipairs allowed-transition-list)]
-          (when (not (. states (tostring to-state-sym)))
-            (error (.. "invalid transition from " (tostring state-sym) ": " (tostring to-state-sym) " is not a state"))))))
+          (when (not (. transitions (tostring to-state-sym)))
+            (error (.. "invalid transition from " (tostring state-sym)
+                       ": " (tostring to-state-sym) " is not a state"))))))
 
-    `(let [states-enum# ,(enum (unpack state-syms))]
-       
-       (values machine# states-enum#))))
+    `(let [states-enum# ,(enum (unpack state-syms))
+           machine#
+           (fn [prev-state ,(unpack args)]
+             (match state
+               ,(expand-condition-blocks ...)))]
+       (values states-enum#))))
 
 {: enum : split-alternating : state-machine}
 #+END_SRC
@@ -635,7 +662,7 @@ the functions take the same two arguments:
   bytes. This cursor will be advanced by the collector.
 - The second, ~err~, should be a function to call when the collector
   encounters a token parsing error.
-  
+
 The functions provided by a collector are the following:
 
 - ~take~ - advances the collector over the next token and returns it as
@@ -674,11 +701,11 @@ This allows us to construct collectors as follows:
 ;; Example - not a part of the source code!
 (collector example-collector [collect? cursor err]
   ;; - collect? is a boolean indicating whether to return the collected
-  ;;   bytes or just nil
+  ;;   bytes or to return nil
   ;; - cursor is a cursor interface to the byte stream
   ;; - err is a function to call when there is a tokenizing error
 
-  ;; this is just a normal fennel function body
+  ;; this is a normal fennel function body
 
   )
 #+END_SRC
@@ -710,7 +737,7 @@ as any of the following bytes:
              (and (>= b 9) (<= b 13)))))
 
 (fn collect-whitespace [collect? cursor chars chars-i]
-  (if (whitespace? (cursor.peek)) 
+  (if (whitespace? (cursor.peek))
       (let [byte (cursor.take)]
         (when collect? (tset chars chars-i byte))
         (collect-whitespace collect? cursor chars (+ chars-i 1)))
@@ -752,7 +779,7 @@ defined as any character except the following:
 To track delimiters, we will use a ~delims~ table. Opening delimiters
 have the corresponding closer as their value. Closing delimiters
 simply have ~true~.
- 
+
 #+BEGIN_SRC fennel :noweb-ref delims
 (local delims {40 41    ;; (
                41 true  ;; )
@@ -823,7 +850,7 @@ as follows:
   what byte it is, then transition back to ~base~.
 - ~done~: close the collection loop and, if collecting, return the
   collected bytes.
-  
+
 #+BEGIN_SRC fennel :noweb-ref string-collector
 (local string-collector-states (enum start base backslash done))
 (fn collect-string [collect? cursor err state chars chars-i]
@@ -911,7 +938,7 @@ those explicitly listed will result in an error):
   and will cause an error if it is the last character.
 - ~exp-digit~: a digit in the tens-exponent portion of the number has
   been found. Transitions to ~exp-digit~.
-  
+
 #+BEGIN_SRC fennel :noweb-ref number-collector
 (fn digit-char? [b] (and (> b 47) (< b 58)))
 (fn hex-letter-digit-char? [b] (or (and (> b 64) (< b 71))
@@ -942,7 +969,7 @@ those explicitly listed will result in an error):
 (fn number-collector-state-machine [err state byte]
   (let [s number-collector-states]
     (match (values state byte)
-      
+
       ;; --- start ---
       (s.start 45) s.negate
       (s.start 46) s.dec-point
@@ -954,29 +981,29 @@ those explicitly listed will result in an error):
 
       ((s.start b) ? (hex-indicator-char? b))
       (err "unexpected leading hex indicator char")
-      
+
       ;; --- negate ---
       (s.negate 46) s.dec-point
       (s.negate 48) s.leading-0
       ((s.negate b) ? (digit-char? b)) s.digit
       (s.negate b) (err-unexpected-char b "following negation char")
-      
+
       ;; --- dec-point ---
       ((s.dec-point b) ? (exponent-char? b)) s.exp
       ((s.dec-point b) ? (digit-char? b)) s.dec-digit
       (s.dec-point b) (err-unexpected-char b "following decimal point")
-      
+
       ;; --- hex-dec-point
       ((s.hex-dec-point b) ? (hex-digit-char? b)) s.hex-dec-digit
       (s.hex-dec-point b) (err-unexpected-char b "following decimal point")
-      
+
       ;; --- leading-0 ---
       (s.leading-0 45) (err "unexpected hyphen following leading zero")
       (s.leading-0 46) s.dec-point
       ((s.leading-0 b) ? (digit-char? b)) s.digit
       ((s.leading-0 b) ? (exponent-char? b)) s.exp
       ((s.leading-0 b) ? (hex-indicator-char? b)) s.base-hex
-      
+
       ;; --- base-hex ---
       (s.base-hex 46) s.hex-dec-point
       ((s.base-hex b) ? (hex-digit-char? b)) s.hex-digit
@@ -984,7 +1011,7 @@ those explicitly listed will result in an error):
 
       ((s.base-hex ?b) ? (not ?b))
       (err "unexpected end of number following hex indicator char")
-      
+
       ;; --- digit ---
       (s.digit 45) (err "unexpected hyphen following digit")
       (s.digit 46) s.dec-point
@@ -1000,10 +1027,10 @@ those explicitly listed will result in an error):
       ;; --- dec-digit ---
       (s.dec-digit 46) (err "unexpected second decimal point")
       ((s.dec-digit b) ? (digit-char? b)) s.dec-digit
-      
+
       ;; reuse s.digit state for all other cases
       (s.dec-digit ?b) (number-collector-state-machine err s.digit ?b)
-      
+
       ;; --- hex-digit ---
       (s.hex-digit 45) (err "unexpected hyphen following digit")
       (s.hex-digit 46) s.hex-dec-point
@@ -1015,7 +1042,7 @@ those explicitly listed will result in an error):
       ;; --- hex-dec-digit ---
       (s.hex-dec-digit 46) (err "unexpected second decimal point")
       ((s.hex-dec-digit b) ? (digit-char? b)) s.hex-dec-digit
-      
+
       ;; reuse s.hex-digit state for all other cases
       (s.hex-dec-digit ?b) (number-collector-state-machine err s.hex-digit ?b)
 
@@ -1026,7 +1053,7 @@ those explicitly listed will result in an error):
 
       ((s.exp ?b) ? (not ?b))
       (err "unexpected end of number following exponent char")
-      
+
       ;; --- exp-negate ---
       ((s.exp-negate b) ? (digit-char? b)) s.exp-digit
       (s.exp-negate b) (err-unexpected-char b "following exponent hyphen char")
@@ -1040,14 +1067,14 @@ those explicitly listed will result in an error):
 
       (s.exp-digit b)
       (err "unexpected char \"" (string.char b) "\" following exponent digit char")
-      
+
       ((_ ?b) ? (or (not ?b) (whitespace? ?b) (delim? ?b))) s.end
-      
+
       ;; catch all other states
       _ (err-invalid-number-character err state byte))))
 
 (fn collect-number [collect? cursor err state chars chars-i]
-  
+
   (let [s number-collector-states
         byte (cursor.peek)
         new-state (number-collector-state-machine err state byte)]
@@ -1063,7 +1090,6 @@ those explicitly listed will result in an error):
 #+END_SRC
 
 **** Tests :noexport:
-
 #+BEGIN_SRC fennel :tangle test.fnl
 (describe
  "number collector"
@@ -1183,7 +1209,6 @@ those explicitly listed will result in an error):
 <<number-collector>>
 #+END_SRC
 
-
 ** Building the Tokenizer
 Our tokenizer will take a stream of bytes and, using the collectors
 already defined, output a stream of tokens.
@@ -1229,7 +1254,7 @@ already defined, output a stream of tokens.
 
       (b ? (= b 58) (let [next-b (cursor.peek-at 2)] (symbol-char? next-b)))
       (values tts.kw-str (keyword-string-collector.take-string cursor err))
-      
+
       (b ? (symbol-char? b))
       (values tts.symbol (symbol-collector.take-string cursor err))
 
@@ -1281,6 +1306,24 @@ already defined, output a stream of tokens.
 
 #+END_SRC
 
+* Parsing
+#+BEGIN_SRC fennel :noweb-ref parser
+(local fennelview (require :fennelview))
+(fn token-stream->form-stream [token-stream]
+  (let [cursor (create-cursor token-stream)
+        stack []]
+    (fennelview (cursor.peek))))
+
+(let [chunk-size 8000
+      f (assert (io.open "/home/benaiah/dev/fennel-the-book/fennel-the-book.fnl"))
+      token-stream (-> #(f:read chunk-size) granulate byte-stream->token-stream)]
+
+  (for [i 1 10]
+     (-> [(token-stream)]
+         (#[(. token-types (. $ 1)) (. $ 2)])
+         fennelview
+         print)))
+#+END_SRC
 * COMMENT Tools
 ** TODO ~fennel-fmt~
 #+BEGIN_SRC fennel
@@ -1339,7 +1382,7 @@ nil
         processed-rows []
         hlines-after {}
         chunks []]
-    
+
     (var table-cell-width 0)
 
     (when column-headers-row (table.insert rows 1 column-headers-row))
@@ -1356,14 +1399,14 @@ nil
           ;; update column width if it's smaller than the current cell
           (when (> val-width (or (. column-widths cell-i) 0))
             (tset column-widths cell-i val-width))
-          
+
           ;; update table cell width
           (when (> cell-i table-cell-width) (set table-cell-width cell-i))
           (fast-push processed-cells val)))
       (fast-push processed-rows processed-cells))
-    
+
     (local table-cell-height (fast-length processed-rows))
-    
+
     ;; print the cells to the chunks table
     (each [row-i row (ipairs processed-rows)]
       (fast-push chunks "|") ;; left border
@@ -1399,7 +1442,7 @@ nil
         processed-rows []
         {: headers} (or options {})]
     (each [i row (ipairs rows)]
-      (local processed-row 
+      (local processed-row
              (if (= (type row) :table)
                  (let [processed-cells []]
                    (each [i cell (ipairs row)]
@@ -1420,7 +1463,7 @@ nil
 #+BEGIN_SRC fennel :noweb tangle :tangle fennel-the-book.fnl
 <<hashbang>>
 
-(local unpack (or unpack table.unpack))
+(global unpack (or unpack table.unpack))
 ;; (macro → [...] `(-> ,...))
 
 <<enum>>
@@ -1435,9 +1478,12 @@ nil
 
 <<tokenizer>>
 
+<<parser>>
+
 {:streams {: stateful-string-stream : create-cursor}
  : token-types
  : string-collector
  : number-collector
+ : token-stream->form-stream
  }
 #+END_SRC
