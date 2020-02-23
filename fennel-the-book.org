@@ -1,7 +1,14 @@
 #+TITLE: Fennel - The Book
-#+OPTIONS: html-style:nil num:nil
+#+OPTIONS: html-style:nil
 #+BIND: org-html-table-default-attributes (:border "0" :frame "void")
+#+LATEX_CLASS: book-without-parts
+#+LATEX_HEADER: \usemintedstyle{tango}
+#+LATEX_HEADER: \hypersetup{colorlinks=true,urlcolor=blue,linkcolor=blue}
+#+LATEX_HEADER: \AtBeginEnvironment{minted}{%
+#+LATEX_HEADER:  \renewcommand{\fcolorbox}[4][]{#4}}
 #+HTML_HEAD: <link rel="stylesheet" type="text/css" href="fennel-the-book.css" />
+#+HTML_HEAD: <script type="text/javascript" src="fengari-web.js"></script>
+#+HTML_HEAD: <script type="application/lua" src="fennel-the-book-html-script.lua" async></script>
 #+HTML_HEAD_EXTRA: 
 
 * Introduction
@@ -34,92 +41,117 @@ the compiler is left until the end, since it's largely miscellaneous
 boilerplate that doesn't contribute to an understanding of the code.
 
 ** What is Fennel?
-Fennel is a language that compiles to [[https://www.lua.org/][Lua]]. It is a member of the Lisp
-family of languages. The Fennel compiler is a Lua program, either
-written by hand in Lua (the original Fennel compiler) or compiled to
-Lua from Fennel code (this book's compiler). When you run a Fennel
-program, it is first compiled into Lua code and then run by the Lua
-interpreter. Running Fennel from the command line once you have it
-installed looks like this:
+Fennel is a language that compiles to [[https://www.lua.org/][Lua]]. It's part of the Lisp
+language family, which includes languages like Common Lisp, Clojure,
+Racket, and Scheme.
+
+The Fennel compiler is a Lua program - the original compiler was
+written by hand in Lua, and the compiler in this book compiles to
+Lua. When you run a Fennel program, it is first compiled into Lua code
+and then run by the Lua interpreter. Running Fennel from the command
+line once you have it installed looks like this:
 
 #+BEGIN_SRC bash :exports both :results output
 # Example - not a part of the source code!
-fennel --eval "
-(var sum-of-indices 0)
-(each [i char (ipairs [:a :b :c])]
-  (set sum-of-indices (+ sum-of-indices i))
-  (: io.stdout :write (.. char i :! \" \" )))
-(print)
-sum-of-indices"
+fennel --eval "(+ 1 1)"
 #+END_SRC
 
 #+RESULTS:
-
-You can also compile code to Lua separately, and then run it with a
-Lua compiler, e.g.:
-
-#+BEGIN_SRC bash :exports both :results output
-# Example - not a part of the source code!
-echo "(comment \"compiled fennel file\") (print (+ 1 1))" \
-  | fennel --compile /dev/stdin > precompiled-fennel.fnl
-cat precompiled-fennel.fnl
-echo ""
-lua precompiled-fennel.fnl
-#+END_SRC
-
-#+RESULTS:
-: -- compiled fennel file
-: return print((1 + 1))
-: 
 : 2
 
-** TODO Self-hosting
+You can also compile code to Lua ahead of time and then run it with a
+Lua interpreter, e.g.:
+
+#+BEGIN_SRC bash :exports both :results output
+# Example - not a part of the source code!
+echo '(print (.. "hello " "world!"))' |
+  fennel --compile -   |         # compile fennel from stdin
+  tee compiled.lua     |         # copy the output to compiled.fnl
+  xargs -0 printf 'compiled: %s' # print the output
+printf "output:   $(lua compiled.lua)"
+#+END_SRC
+
+#+RESULTS:
+: compiled: return print(("hello " .. "world!"))
+: output:   hello world!
+
+** Test file header :noexport:
+#+BEGIN_SRC fennel :tangle test.fnl
+((require :busted.runner))
+
+(local describe describe)
+(local assert assert)
+(local it it)
+#+END_SRC
+
+** TODO COMMENT Self-hosting
 The compiler implemented in this book cannot compile itself yet. In
 fact, it's not even a compiler yet! In order to run what /is/
 implemented in the book, you'll need to download the Fennel compiler
 and put it on your ~$PATH~ as ~fennel~.
 
-*** TODO explain ~$PATH~ and Fennel installation :noexport:
+*** DONE explain ~$PATH~ and Fennel installation                 :noexport:
 
-** TODO Real credits :noexport:
-/Replace the vague credit in the intro with real credits section including Fennel contributors/
+** TODO COMMENT Introduction to ASCII and UTF-8
+** TODO COMMENT Real credits
+Replace the vague credit in the intro with real credits section
+including Fennel contributors.
 
-** DONE Get ~fennel --eval~ upstreamed                              :noexport:
-* TODO A Dash of Fennel
+** DONE COMMENT Get ~fennel --eval~ upstreamed
+* TODO COMMENT A Dash of Fennel
 * Iterators and Streams
 A construct we'll use frequently throughout the book is the /stream/.
-Streams are a method of processing data lazily. The output of a Lua
-iterator is a stream, but we can also create streams manually if we
-want. There are two kinds of streams we use, corresponding to the two
-kinds of iterators in Lua:
+Streams are a functions which output data sequentially. If you've ever
+used an iterator like ~pairs~ or ~ipairs~ in Lua, you've already used
+one - the function that is returned by those iterators is a stream.
+
+ Just as there are two kinds of iterators in Lua, there are likewise
+ two kinds of streams - /stateful/ and /stateless/.
 
 ** Stateful Streams
+Stateful streams capture the state of the stream within a closure (or
+a coroutine). They ignore any arguments, and return the next element
+of the stream each time they are called.  Here's a function which
+creates a stateful stream that returns each byte in a string
+successively:
 
-Stateful/ streams capture the state of the stream within a closure (or
-a coroutine). They are called with no arguments, and return the next
-element of the stream each time they are called.
-
-Here's a function which creates a stateless stream that returns each
-byte in a string successively:
-
-#+BEGIN_SRC fennel :noweb-ref string-stream :results output
-(fn string-stream [str]
+#+BEGIN_SRC fennel :results output
+(fn string-bytes [str]
   (var index 1)
   #(let [r (: str :byte index)]
      (set index (+ index 1))
      r))
 
-(each [byte (string-stream "abc")]
-  (print byte (string.char byte)))
+(each [byte (string-bytes "abc")]
+  (print (.. byte " " (string.char byte))))
 #+END_SRC
 
 #+RESULTS:
-: 97	a
-: 98	b
-: 99	c
+: 97 a
+: 98 b
+: 99 c
+
+Stateful streams are less flexible - because the state is stored
+within the closure, there's no way to set the state from outside the
+stream. One of the most important implications of stateful streams is
+that you can only traverse the stream once.
+
+Some streams are inherently stateful. For instance, the data returned
+by ~(io.read)~ is only returned once, and calling it again will result
+in new data being returned. Here's how we could turn that into a
+stateful stream:
+
+#+BEGIN_SRC fennel
+(local chunk-size (^ 2 13)) ;; 8kb
+(fn file-chunks [filename]
+  (local f (if filename (io.open filename :r)
+               io.stdin))
+  #(let [chunk (: f :read chunk-size)]
+     (when (not chunk) (: f :close))
+     chunk))
+#+END_SRC
 
 ** Stateless Streams
-
 /Stateless/ streams have their state passed in using two arguments:
 the /invariant state/ and the /variant state/. Each time the stream
 is called, it must be passed the two state values as arguments. The
@@ -131,33 +163,42 @@ To illustrate this more concretely, let's take a look at the iterator
 invariant state is the table containing the elements, and the variant
 state is the current index of the stream.
 
-#+BEGIN_SRC fennel :results output
+#+BEGIN_SRC fennel :results output :exports both
 ;; Example - not a part of the source code!
 (local fennelview #((require :fennelview) $ {:one-line true}))
-(local letters [:a :b :c])
 
-;; the invariant state is the array, and the variant state is the
-;; last index (starting at 0)
-(let [(stream arr initial-i) (ipairs letters)]
-  ;; Iterate the stream manually
-  (local (new-i value) (stream arr initial-i))
-  (print (fennelview {: arr :i initial-i : new-i : value}))
-
-  ;; Iterate the stream with a different table and index
-  ;; statelessness
-  (local another-arr [:d :e :f])
-  (local (another-new-i another-value) (stream another-arr 2))
-  (print (fennelview {:arr another-arr :i 2 :new-i another-new-i :value another-value})))
+(let [letters [:a :b :c]
+      ;; the invariant state is the array, and the variant state is
+      ;; the last index (starting at 0)
+      (stream arr initial-i) (ipairs letters)]
+ 
+  ;; Manually iterate the stream
+  (var i initial-i)
+  (while i
+    (let [(new-i value) (stream arr i)]
+      (set i new-i)
+      (print (fennelview {: arr : i : value}))))
+  
+  ;; Manually iterate the stream once with a different table and index
+  (let [arr [:d :e :f]
+        initial-i 1
+        (i value) (stream arr initial-i)]
+    (print (fennelview {: arr :i i : value}))))
 #+END_SRC
 
 #+RESULTS:
+: {:arr ["a" "b" "c"] :i 1 :value "a"}
+: {:arr ["a" "b" "c"] :i 2 :value "b"}
+: {:arr ["a" "b" "c"] :i 3 :value "c"}
+: {:arr ["a" "b" "c"]}
+: {:arr ["d" "e" "f"] :i 2 :value "e"}
 
-** Intro to Streams: ~string-stream~
+** Intro to Streams: ~stateful-string-stream~
 As both an example and a helper function for later use, let's define a
-function that creates a stream from a string:
+function that creates a stateful stream from a string:
 
-#+BEGIN_SRC fennel :noweb-ref string-stream
-(fn string-stream [str]
+#+BEGIN_SRC fennel :noweb-ref stateful-string-stream
+(fn stateful-string-stream [str]
   (var index 1)
   #(let [r (: str :byte index)]
      (set index (+ index 1))
@@ -169,35 +210,66 @@ maintaing the state in the function itself. Each time it is called, it
 will return the next byte in the string.
 
 One handy feature of this design is that these streams are also
-iterators! For instance, using ~string-stream~ we can print the bytes of
-a string with the following code:
+iterators! For instance, using ~stateful-string-stream~ we can print
+the bytes of a string with the following code:
 
 #+BEGIN_SRC fennel :exports both :noweb yes
 ;; EXAMPLE - not a part of the source code!
-(local {: string-stream} (. (require :fennel-the-book) :streams))
-(each [byte (string-stream "abc")]
+(local {:streams {: stateful-string-stream}} (require :fennel-the-book))
+(each [byte (stateful-string-stream "abc")]
   (: io.stdout :write (.. byte " ")))
 #+END_SRC
 
 #+RESULTS:
-: 97 98 99 
+: 97 98 99 nil
 
-** Buffering streams with ~get-stream-cursor~
+** COMMENT Transforming streams - ~map~, ~filter~, ~reduce~
+It is often useful to be able to express a program as a functional
+transformation of streams. This is directly analogous to transforming
+lists or arrays, and we can use the same terminology:
+
+- ~map-stream~ should return a new stream that outputs one element for
+  each element of the original stream, transforming it with a
+  function.
+- ~filter-stream~ should return a new stream that outputs one or zero
+  elements for each element of the original stream, based on the
+  return value of calling its predicate function on the element. The
+  remaining elements are unchanged by the filter.
+- ~reduce-stream~ should return a new stream that outputs items based on
+  consuming the original stream. The elements it outputs may have an
+  arbitrary relationship to the elements output by the original
+  stream - one-to-one, many-to-one, one-to-many, or a mixture of
+  these.
+  
+These operations match many of the operations we need to perform in
+the compiler:
+
+- Tokenizing is a ~reduce~ of bytes to a smaller number of tokens.
+- Comment elimination is a ~filter~ removing comment tokens from the
+  token stream.
+- Parsing is a ~reduce~ of tokens to a smaller number of forms.
+- Compiling is a (recursive) ~map~ of AST forms to strings of Lua code.
+
+** Buffering stateful streams with ~create-cursor~
+:PROPERTIES:
+:CUSTOM_ID: get-stream-cursor
+:END:
 The tokenizer we will implement in the next chapter will be using the
-~string-stream~ we just defined to stream the bytes of the code it's
-digesting. However, the stream we've defined can be awkward to use -
-without keeping track of things manually we can't check bytes ahead of
-the stream's current position without advancing the stream. This gets
-quite messy to deal with, since you can't just pass the stream to a
-function if you might need to send buffered data or both instead.
+~stateful-string-stream~ we just defined to stream the bytes of the code
+it's digesting. However, the stream we've defined can be awkward to
+use - without keeping track of things manually we can't check bytes
+ahead of the stream's current position without advancing the
+stream. This gets quite messy to deal with, since you can't just pass
+the stream to a function if you might need to send buffered data or
+both instead.
 
-To remedy this, we'll define a simple abstraction over a stream called
-a ~cursor~. The cursor is a table with two main functions that provide
-access to the values in the stream - ~take~ and ~peek~.
+To remedy this, we'll define a simple abstraction over a stateful
+stream called a ~cursor~. The cursor is a table with two main functions
+that provide access to the values in the stream - ~take~ and ~peek~.
 
-~cursor.take~ is itself a stream - if you create a cursor that wraps a
-stream and iterate over ~cursor.take~, you will get exactly the same
-values as if you iterated over the original stream.
+~cursor.take~ is itself a stateful stream - if you create a cursor that
+wraps a stateful stream and iterate over ~cursor.take~, you will get
+exactly the same values as if you iterated over the original stream.
 
 ~cursor.peek~, on the other hand, lets you look at the upcoming values
 of ~cursor.take~. It does so by calling the original stream and then
@@ -206,11 +278,12 @@ it returns any values in the buffer before returning values from the
 original stream.
 
 #+BEGIN_SRC fennel :noweb-ref create-cursor
-(fn create-cursor [stream invariant-state ]
+(fn create-cursor [stream]
   ;; We track the current position and the end of the buffer. The
   ;; indices of the buffer items will always be between these two
   ;; numbers. Since we don't move the buffer elements back to the
-  ;; beginning at any point, these will increase monotonically.
+  ;; beginning at any point, these indices will increase
+  ;; monotonically.
   (var position 0)
   (var buffer-end 0)
   (let [;; This is the buffer to store values that were retrieved
@@ -220,14 +293,18 @@ original stream.
         buffer-get #(. buffer (+ position $))
         buffer-set #(tset buffer (+ position $1) $2)
         buffer-push
-        #(let [buf-end (+ buffer-end 1)]
-           (tset buffer buf-end $)
-           (set buffer-end buf-end))
+        #(let [new-buffer-end (+ buffer-end 1)]
+           (tset buffer new-buffer-end $)
+           (set buffer-end new-buffer-end))
         buffer-load-and-get
-        #(if (> $ (buffer-length))
+        #(if (= $ (+ 1 (buffer-length)))
              (let [new-item (stream)]
                (buffer-push new-item)
                new-item)
+             (> $ (buffer-length))
+             (let [new-item (stream)]
+               (buffer-push new-item)
+               (buffer-load-and-get $))
              (let [old-item (buffer-get $)]
                old-item))
 
@@ -239,12 +316,11 @@ original stream.
            ;; Base case - return the remaining item
            (or (not remaining) (= remaining 1))
            (buffer-load-and-get i)
-
            ;; Otherwise, return the item at i and recursively iterate
            ;; until we've returned all the requested values
            (values (buffer-load-and-get i)
                    (peek-at (+ i 1) (- remaining 1)))))
-        peek #(peek-at 1 (or $1 1))
+        peek #(peek-at 1 (or $ 1))
 
         take
         #(if (> (buffer-length) 0)
@@ -255,7 +331,7 @@ original stream.
              (do (set position (+ position 1))
                  (set buffer-end (+ buffer-end 1))
                  (stream)))]
-    {: peek : take}))
+    {: peek : peek-at : take}))
 #+END_SRC
 
 To demonstrate how this can be useful, let's try out our cursor with
@@ -264,9 +340,10 @@ some sample code:
 #+BEGIN_SRC fennel :exports both :results output org drawer
 ;; Example - not a part of the source code!
 (let [{: print-table} (require :org-table-helpers)
-      {:streams {: string-stream : create-cursor}} (require :fennel-the-book)
+      {:streams {: stateful-string-stream
+                 : create-cursor}} (require :fennel-the-book)
       unpack (or unpack table.unpack) {: insert : concat} table
-      stream (string-stream "abcdef")
+      stream (stateful-string-stream "abcdef")
       cursor (create-cursor stream)
       rows []]
 
@@ -310,21 +387,22 @@ As you can see, the ~(cursor.peek)~ expression does not affect the
 subsequent ~(cursor.peek 2)~ expression - the values only advance when
 ~cursor.take~ is called in the iterator.
 
-** TODO Multistreams :noexport:
-* Tokenizing
-The first step towards compiling code is tokenizing. Our tokenizer
-takes a stream of bytes and transforms it into a stream of /tokens/. A
-token is a representation of a single element of the language. Tokens
-are /not/ nested - for instance, we don't have a ~list~ token type, but
+* Tokenizing: Bytes and Pieces
+The first step towards compiling code is /tokenizing/. Tokenizing is the
+process of taking the source format of the language - in our case, a
+UTF-8 string - and turning it into /tokens/. Tokens are the individual
+instances of the basic elements of a languages grammar. Tokens are
+not/ nested - for instance, we don't have a ~list~ token type, but
 rather ~opener~ and ~closer~ token types to indicate when a list begins
 and ends.
 
-The grammar 
+Each token is tagged with a /token type./ There is a finite number of
+token types, as follows:
 
 The total list of token types is as follows:
 
 - String literals - e.g., ~"example"~
-- Number literals - e.g., ~3.456e-7~
+- Number literals - e.g., ~3.456e-7~ or ~0xabc123~
 - Symbols - e.g., ~example~
 - Keyword strings - e.g., ~:example~
 - Openers - ~(~, ~[~, or ~{~
@@ -337,31 +415,881 @@ are completely ignored, but we tokenize them anyway so that the
 tokenizer can be re-used by other tooling, like a formatter for Fennel
 code.
 
-Since the number of token types is fixed and small, it's fairly
-convenient to use integers instead of strings to represent the token
-types, using a convenience table that stores a mapping of string names
-to number values and predicate functions that let us check the type
-readably without converting to a string:
+Since the number of token types is fixed and small, it's convenient to
+use integers instead of strings to represent the token types, using a
+convenience table that stores a mapping of string names to number
+values and predicate functions that let us check the type readably
+without converting to a string:
+
+#+BEGIN_SRC fennel :noweb-ref enum
+(macro enum [...]
+  (let [unpack (or unpack table.unpack)
+        cases [...]
+        stringed-cases []]
+
+    (each [i case (ipairs cases)]
+      (let [stringed-case (tostring case)]
+        ;; (tset kv-pairs adjusted-i [i stringed-case])
+        ;; (tset kv-pairs (+ adjusted-i 1) [stringed-case i])
+        ;; (tset kv-pairs (+ adjusted-i 2) [(.. stringed-case :?) `#(= $ ,i)])
+        (tset stringed-cases i (tostring case))))
+    
+    `(let [this-enum# [,(unpack stringed-cases)]]
+       (each [k# v# (ipairs this-enum#)]
+         ;; this-enum.CASE will return the int
+         (tset this-enum# v# k#)
+         ;; this-enum.case? will check equality with the int
+         (tset this-enum# (.. v# :?) #(= $ k#)))
+       this-enum#)))
+#+END_SRC
 
 #+BEGIN_SRC fennel :noweb-ref token-types
 (local token-types
-       ;; create the table with a mapping of ints to strings
-       (let [tts [:string :number :symbol :kw-string
-                  :opener :closer :prefix :whitespace :comment]]
-         (each [k v (ipairs tts)]
-           ;; token-types.TYPE will return the int
-           (tset tts v k)
-           ;; token-types.TYPE? will check if the argument equals that type
-           (tset tts (.. v :?) #(= $ k)))
-         tts))
+       (enum str number symbol kw-str
+             opener closer prefix
+             whitespace comment))
 #+END_SRC
 
-* Tools
-** ~fawk~
+** TODO COMMENT Intro to state machines
+** TODO State machine macro based on enum and match
+
+- Generates a function of ~(state ... args) -> (newState ... returns)~
+- 
+
+#+BEGIN_SRC fennel :tangle test-state-machine.fnl
+((require :busted.runner))
+
+(local describe describe)
+(local assert assert)
+(local it it)
+
+(describe
+ "state-machine"
+ #(do
+    (require-macros :state-machine)
+    (let [(str-reader-machine str-reader-states)
+          (state-machine
+
+           ;; State spec
+           ;;
+           ;; Each state is followed by the states it's allowed to
+           ;; transition to. The state-machine macro ensures that we
+           ;; always return a new state or throw an error, that we
+           ;; always transition states according to the spec, and that
+           ;; we haven't omitted any transitions that are included in
+           ;; the spec.
+
+           [start [base]
+            begin [base]
+            base [base backslash end]
+            backslash [base]
+            end []]
+
+           ;; Options
+           ;;
+           ;; If :default-state is set, calling the state machine with
+           ;; a nil first argument will instead use this initial
+           ;; state, and the macro will ensure that all other states
+           ;; are reachable from this initial state. The
+           ;; :default-state must be a member of :initial-states
+           ;;
+           ;; If :initial-states is set, the state machine will ensure
+           ;; that all states are reachable from at least one of the
+           ;; initial states.
+           ;;
+           ;; :initial-state can be used to set both :initial-states
+           ;; and :default-state. Using :initial-state alongside
+           ;; either of the other options causes an error.
+
+           {:initial-states [start begin]
+            :default-state start
+            :on-err error}
+
+           ;; Bind any additional arguments to the state machine
+           [b]
+
+           ;; Condition blocks
+           ;;
+           ;; Each condition bloc has three parts:
+           ;;
+           ;; - Previous state
+           ;;
+           ;; - Condition: a predicate body in which the above
+           ;;   arguments are bound
+           ;;
+           ;; - Result: either another state (as per the above spec)
+           ;;   or an error string literal. If this is a state, it
+           ;;   must be a valid state to transition to according to
+           ;;   the above spec.
+
+           (start (= b 34) base
+                  _ "expected opening quote")
+           (base  (= b 92) backslash
+                  (= b 34) done
+                  (not b) "unterminated string"
+                  _ base)
+           (backslash _ base)
+           (end _ "already finished reading string"))]
+      nil)))
+#+END_SRC
+
+#+BEGIN_SRC fennel :tangle state-machine.fnl
+(fn enum [...]
+  (let [unpack (or unpack table.unpack)
+        cases [...]
+        stringed-cases []]
+
+    (each [i case (ipairs cases)]
+      (let [stringed-case (tostring case)]
+        ;; (tset kv-pairs adjusted-i [i stringed-case])
+        ;; (tset kv-pairs (+ adjusted-i 1) [stringed-case i])
+        ;; (tset kv-pairs (+ adjusted-i 2) [(.. stringed-case :?) `#(= $ ,i)])
+        (tset stringed-cases i (tostring case))))
+    
+    `(let [this-enum# [,(unpack stringed-cases)]]
+       (each [k# v# (ipairs this-enum#)]
+         ;; this-enum.CASE will return the int
+         (tset this-enum# v# k#)
+         ;; this-enum.case? will check equality with the int
+         (tset this-enum# (.. v# :?) #(= $ k#)))
+       this-enum#)))
+
+(fn split-alternating [tab]
+  (let [odds [] evens []]
+    (each [i val (ipairs tab)]
+      (if (= 1 (% i 2))
+          (tset odds (-> i (- 1) (/ 2) (+ 1)) val)
+          (tset evens (/ i 2) val)))
+    (values odds evens)))
+
+;; (fn condition-transition-pair [condition transition]
+;;   (let [t (type transition)]
+;;     (when (not (or (= t :string) (sym? t)))
+;;       (error "")))
+  
+;;   (let [err-cond? (= :string (type transition))
+;;         err-message (if err-cond? transition "")]
+;;     ))
+
+;; (fn transitions-from-state [state ...]
+;;   )
+
+(fn state-machine [spec options args ...]
+  (let [options
+        (if (or (not= (type options) :table) (sequence? options))
+            (error "state-machine options must be a table literal")
+            options)
+        (initial-state-syms default-state-sym)
+        (let [o options]
+          (if (and o.initial-state o.initial-states) (error "both initial-state and initial-states are set")
+              (and o.initial-state o.default-state) (error "both initial-state and default-state are set")
+              o.initial-states (values o.initial-states o.default-state)
+              o.initial-state (values [o.initial-state] o.initial-state)))
+        transition-forms [...]
+        (state-syms allowed-transition-lists) (split-alternating spec)
+        states ,(enum (unpack state-syms))]
+
+    (print ((require :fennelview) states))
+
+    (each [i state-sym (ipairs state-syms)]
+      (let [allowed-transition-list (. allowed-transition-lists i)]
+        (tset states (tostring state-sym) {:allowed-transitions allowed-transition-list})))
+
+    (each [i state-sym (ipairs state-syms)]
+      (let [allowed-transition-list (. allowed-transition-lists i)]
+        (each [j to-state-sym (ipairs allowed-transition-list)]
+          (when (not (. states (tostring to-state-sym)))
+            (error (.. "invalid transition from " (tostring state-sym) ": " (tostring to-state-sym) " is not a state"))))))
+
+    `(let [states-enum# ,(enum (unpack state-syms))]
+       
+       (values machine# states-enum#))))
+
+{: enum : split-alternating : state-machine}
+#+END_SRC
+
+** Collectors
+Our tokenizer will take stateful stream of bytes and create a [[#get-stream-cursor][cursor]]
+over it. The tokenizer will peek at upcoming bytes to decide which
+/collector/ to use.
+
+To illustrate, the tokenizer can be thought of as a state machine
+where the state is encoded in control flow. There are two types of
+possible states of this state machine:
+
+- The base state, when the tokenizer is determining which collector to
+  use. This state will transition into any of the collector states.
+- Collector states, when the tokenizer is collecting bytes into a
+  token. This state will always transition back into the base state.
+
+The way that control flows through function calls and returns matches
+this state flow perfectly, so by using control flow to encode the
+current state, we can enforce that the state only transitions the way
+we want it to - in and out of individual /collectors/.
+
+Our collectors are not actually single functions, but rather a table
+containing a few functions which collect tokens in different ways. All
+the functions take the same two arguments:
+
+- The first, ~cursor~, should be a cursor wrapping a stream of
+  bytes. This cursor will be advanced by the collector.
+- The second, ~err~, should be a function to call when the collector
+  encounters a token parsing error.
+  
+The functions provided by a collector are the following:
+
+- ~take~ - advances the collector over the next token and returns it as
+  a table of bytes.
+- ~take-string~ - advances the collector over the next token and returns
+  it as a string.
+- ~skip~ - advances the collector over the next token, but does not
+  return it.
+- ~advance~ - exposes the raw ~advance~ function for re-use by other
+  collectors.
+
+Since these functions are so similar, we can use a single function,
+which we'll call ~advance~ and which takes an extra initial ~collect?~
+argument indicating whether or not to collect and return the bytes of
+the token, to generate a collector with all the functions just
+described:
+
+#+BEGIN_SRC fennel :noweb-ref get-collector
+(fn get-collector [advance]
+  (fn take [...] (advance true ...))
+  (fn take-string [...] (-> ... take unpack string.char))
+  (fn skip [...] (advance false ...))
+  {: take : take-string : skip : advance})
+#+END_SRC
+
+Then, using a simple macro, we can build a collector just like we do a
+function:
+
+#+BEGIN_SRC fennel :noweb-ref collector
+(macro collector [name ...] `(local ,name (get-collector (fn ,...))))
+#+END_SRC
+
+This allows us to construct collectors as follows:
+
+#+BEGIN_SRC fennel
+;; Example - not a part of the source code!
+(collector example-collector [collect? cursor err]
+  ;; - collect? is a boolean indicating whether to return the collected
+  ;;   bytes or just nil
+  ;; - cursor is a cursor interface to the byte stream
+  ;; - err is a function to call when there is a tokenizing error
+
+  ;; this is just a normal fennel function body
+
+  )
+#+END_SRC
+
+*** TODO COMMENT Rename collectors to readers
+*** DONE COMMENT Rewrite readers recursively to remove explicit loops
+- [X] whitespace
+- [X] comment
+- [X] symbol
+- [X] kw-string
+- [X] string
+- [X] number
+
+*** Whitespace Collector
+The whitespace collector takes or skips all the whitespace bytes at
+the beginning of its cursor argument's stream. Whitespace is defined
+as any of the following bytes:
+
+- 9 (~^I~, tab)
+- 10 (~^J~, line feed)
+- 11 (~^K~, vertical tab)
+- 12 (~^L~, form feed)
+- 13 (~^J~, carriage return)
+- 32 (space)
+
+#+BEGIN_SRC fennel :noweb-ref whitespace-collector
+(fn whitespace? [b]
+  (and b (or (= b 32)
+             (and (>= b 9) (<= b 13)))))
+
+(fn collect-whitespace [collect? cursor chars chars-i]
+  (if (whitespace? (cursor.peek)) 
+      (let [byte (cursor.take)]
+        (when collect? (tset chars chars-i byte))
+        (collect-whitespace collect? cursor chars (+ chars-i 1)))
+      chars))
+
+(collector whitespace-collector [collect? cursor]
+  (collect-whitespace collect? cursor (when collect? []) 1))
+#+END_SRC
+
+*** Comment Collector
+The comment collector is also quite simple. Since collectors are only
+called once the inital byte is matching, and Fennel has only
+line-based comments, we simply collect all bytes until the first
+newline (byte 10).
+
+#+BEGIN_SRC fennel :noweb-ref comment-collector
+(fn collect-comment [collect? cursor chars chars-i]
+  (if (not (= (cursor.peek) 10))
+      (let [byte (cursor.take)]
+        (when collect? (tset chars chars-i byte))
+        (collect-comment collect? cursor chars (+ chars-i 1)))
+      chars))
+
+(collector comment-collector [collect? cursor]
+  (collect-comment collect? cursor (when collect? []) 1))
+#+END_SRC
+
+*** Symbol Collector
+The symbol collector is relatively simple. A symbol character is
+defined as any character except the following:
+
+- Special characters with charcodes 32 and under (includes whitespace)
+- Delimiters
+- Single and double quotes
+- Commas
+- Semicolons
+- DEL control character
+
+To track delimiters, we will use a ~delims~ table. Opening delimiters
+have the corresponding closer as their value. Closing delimiters
+simply have ~true~.
+ 
+#+BEGIN_SRC fennel :noweb-ref delims
+(local delims {40 41    ;; (
+               41 true  ;; )
+               91 93    ;; [
+               93 true  ;; ]
+               123 125  ;; {
+               125 true ;; }
+               })
+
+(fn delim? [b] (not (not (. delims b))))
+#+END_SRC
+
+Now we can define a function that detects symbol characters based on
+the above definition:
+
+#+BEGIN_SRC fennel :noweb-ref symbol-char?
+(fn symbol-char? [b]
+  (and b
+       (> b 32)
+       (not (. delims b))
+       (not= b 34)  ;; "
+       (not= b 39)  ;; '
+       (not= b 44)  ;; ,
+       (not= b 59)  ;; ;
+       (not= b 127) ;; DEL
+       ))
+#+END_SRC
+
+Now that we have that function, we can create a symbol collector
+easily:
+
+#+BEGIN_SRC fennel :noweb-ref symbol-collector
+(fn collect-symbol [collect? cursor chars chars-i]
+  (if (symbol-char? (cursor.peek))
+      (let [byte (cursor.take)]
+        (when collect? (tset chars chars-i byte))
+        (collect-symbol collect? cursor chars (+ chars-i 1)))
+      chars))
+
+(collector symbol-collector [collect? cursor]
+  (collect-symbol collect? cursor (when collect? []) 1))
+#+END_SRC
+
+*** Keyword string collector
+Keyword strings are strings created by prefixing a symbol with the ~:~
+character. Because of this, we can re-use the ~symbol-collector~ we've
+just defined to collect the string after skipping the initial ~:~ character.
+
+#+BEGIN_SRC fennel :noweb-ref keyword-string-collector
+(collector keyword-string-collector [collect? cursor ...]
+  (cursor.take) ;; skip : character
+  (symbol-collector.advance collect? cursor ...))
+#+END_SRC
+
+*** String collector
+Strings in Fennel are delimited with double quotes, which can be
+escaped within the string using backslashes. Due to this escaping, the
+string collector is the first to require an explicit state machine
+within the collector itself. The possible states of this machine are
+as follows:
+
+- ~start~: takes the opening quote (erroring if it's not a quote), then
+  transitions to ~base~.
+- ~base~: take string bytes normally, looking for the next double-quote
+  character (byte 34), and adds them to the string. Transitions to
+  ~backslash~ if it sees a backslash character (byte 92).
+- ~backslash~: takes and adds the next byte to the string, regardless of
+  what byte it is, then transition back to ~base~.
+- ~done~: close the collection loop and, if collecting, return the
+  collected bytes.
+  
+#+BEGIN_SRC fennel :noweb-ref string-collector
+(local string-collector-states (enum start base backslash done))
+(fn collect-string [collect? cursor err state chars chars-i]
+  (let [s string-collector-states]
+    (if (= state s.done) chars
+        (let [byte (cursor.take)
+              new-state
+              (match (values state byte)
+                (s.start 34) s.base
+                (s.start _) (err "string collector called while cursor is at a non-string")
+                (s.base 92) s.backslash
+                (s.base 34) s.done
+                (s.backslash _) s.base
+                ((_ ?b) ? (not byte)) (err "unterminated string")
+                _ state)]
+          (when collect? (tset chars chars-i byte))
+          (collect-string collect? cursor err new-state chars (+ chars-i 1))))))
+
+(collector string-collector [collect? cursor err]
+  (collect-string collect? cursor err string-collector-states.start (when collect? []) 1))
+#+END_SRC
+
+**** Tests :noexport:
+#+BEGIN_SRC fennel :tangle test.fnl
+(describe
+ "string collector"
+ #(let [{:streams {: stateful-string-stream : create-cursor}
+         : string-collector} (require :fennel-the-book)
+        collect-string #(-> $ stateful-string-stream create-cursor (string-collector.take-string error))]
+    (it "should parse a normal string containing whitespace"
+        #(let [s "\"just some old regular string \r\n with some whitespace in\""]
+           (assert.are.equal s (collect-string s))))
+    (it "should parse a string with a backslash escape"
+        #(let [s "\" \\\\ \""] (assert.are.equal s (collect-string s))))
+    (it "should parse a string with an escaped quote"
+        #(let [s "\" \\\" \""] (assert.are.equal s (collect-string s))))
+    (it "should parse a string with a backslash followed by an escaped quote"
+        #(let [s "\" \\\\\\\" \""] (assert.are.equal s (collect-string s))))
+    (it "should stop parsing at the first unescaped quote"
+        #(let [s "\"here is the string\" and here is the suffix"]
+           (assert.are.equal "\"here is the string\"" (collect-string s))))
+    (it "should error on unterminated string"
+        #(assert.has.error #(collect-string "\"abcdef") "unterminated string"))
+    (it "should error when called on something not a string"
+        #(assert.has.error #(collect-string " \"abcdef") "string collector called while cursor is at a non-string"))))
+#+END_SRC
+
+*** Number Collector
+The number collector is the most complicated collector, and includes a
+rather involved state machine to keep track of the state of the
+collector. In each step, the machine chooses a new step The possible
+states of this machine are as follows (all transitions other than
+those explicitly listed will result in an error):
+
+- ~start~: the collector begins in this state, and chooses which state
+  to transition to based on the first character. Transitions to
+  ~negate~, ~dec-point~, ~leading-0~, or ~digit~.
+- ~negate~: the collector has found a leading hyphen. Transitions to
+  ~dec-point~, ~leading-0~, or ~digit~.
+- ~dec-point~: the collector has found a decimal point. Transitions to
+  ~exp~ or ~dec-digit~.
+- ~hex-dec-point~: the collector has found a decimal point in a hex
+  number. Transitions to ~hex-dec-digit~.
+- ~leading-0~: the collector has found a leading zero. Transitions to
+  ~dec-point~, ~digit~, ~exp~, or ~base-hex~.
+- ~base-hex~: the collector has found a hex indicator
+  character. Transitions to ~hex-dec-point~ or ~hex-digit~. May not end
+  the number and will cause an error if it is the last character.
+- ~digit~: the collector has found a digit before the decimal
+  point. Transitions to ~dec-point~, ~digit~, or ~exp~.
+- ~dec-digit~: the collector has found a digit after the decimal
+  point. Acts identically to ~digit~ except that another decimal point
+  will produce an error.
+- ~hex-digit~: the collector has found a digit in a hex
+  number. Transitions to ~hex-dec-point~ or ~hex-digit~.
+- ~hex-dec-digit~: the collector has found a digit after the decimal
+  point in a hex number. Acts identically to ~hex-digit~ except that
+  another decimal point will produce an error.
+- ~exp~: the ~e~ or ~E~ character has been found in a non-hex number,
+  indicating that the number should be summed with 10 to the given
+  power. Transitions to ~exp-negate~ or ~exp-digit~. May not end the
+  number and will cause an error if it is the last character.
+- ~exp-negate~: a hyphen has been found immediately following an
+  exponent indicator. Transitions to ~exp-digit~. May not end the number
+  and will cause an error if it is the last character.
+- ~exp-digit~: a digit in the tens-exponent portion of the number has
+  been found. Transitions to ~exp-digit~.
+  
+#+BEGIN_SRC fennel :noweb-ref number-collector
+(fn digit-char? [b] (and (> b 47) (< b 58)))
+(fn hex-letter-digit-char? [b] (or (and (> b 64) (< b 71))
+                                   (and (> b 96) (< b 103))))
+(fn hex-digit-char? [b] (or (digit-char? b) (hex-letter-digit-char? b)))
+(fn exponent-char? [b] (or (= b 69) (= b 101)))
+(fn hex-indicator-char? [b] (or (= b 88) (= b 120)))
+
+(fn err-unexpected-char [err b message]
+  (err (.. "unexpected char \"" (string.char b) "\" " message)))
+
+(local number-collector-states
+  (enum start negate dec-point hex-dec-point
+        leading-0 base-hex digit dec-digit
+        hex-digit hex-dec-digit
+        exp exp-negate exp-digit))
+
+(fn err-unhandled-state-transition [err state b]
+  (err (.. "unhandled state transition in number parser!\tstate: " (. number-collector-states state)
+           "\tbyte: " (or b "<nil>") "\tchar: " (or (string.char b) "<nil>"))))
+
+(fn err-invalid-number-character [err state b]
+  (err (.. "invalid char in number: " (string.char b) "\tchar value: " 122)))
+
+;; takes a state and byte (which can potentially be nil) and returns a
+;; new state. returning :end will end the collection loop, ignoring
+;; the final byte that the state machine was called with
+(fn number-collector-state-machine [err state byte]
+  (let [s number-collector-states]
+    (match (values state byte)
+      
+      ;; --- start ---
+      (s.start 45) s.negate
+      (s.start 46) s.dec-point
+      (s.start 48) s.leading-0
+      ((s.start b) ? (digit-char? b)) s.digit
+
+      ((s.start b) ? (exponent-char? b))
+      (err "unexpected leading exponent char")
+
+      ((s.start b) ? (hex-indicator-char? b))
+      (err "unexpected leading hex indicator char")
+      
+      ;; --- negate ---
+      (s.negate 46) s.dec-point
+      (s.negate 48) s.leading-0
+      ((s.negate b) ? (digit-char? b)) s.digit
+      (s.negate b) (err-unexpected-char b "following negation char")
+      
+      ;; --- dec-point ---
+      ((s.dec-point b) ? (exponent-char? b)) s.exp
+      ((s.dec-point b) ? (digit-char? b)) s.dec-digit
+      (s.dec-point b) (err-unexpected-char b "following decimal point")
+      
+      ;; --- hex-dec-point
+      ((s.hex-dec-point b) ? (hex-digit-char? b)) s.hex-dec-digit
+      (s.hex-dec-point b) (err-unexpected-char b "following decimal point")
+      
+      ;; --- leading-0 ---
+      (s.leading-0 45) (err "unexpected hyphen following leading zero")
+      (s.leading-0 46) s.dec-point
+      ((s.leading-0 b) ? (digit-char? b)) s.digit
+      ((s.leading-0 b) ? (exponent-char? b)) s.exp
+      ((s.leading-0 b) ? (hex-indicator-char? b)) s.base-hex
+      
+      ;; --- base-hex ---
+      (s.base-hex 46) s.hex-dec-point
+      ((s.base-hex b) ? (hex-digit-char? b)) s.hex-digit
+      (s.base-hex b) (err-unexpected-char err b "following hex indicator char")
+
+      ((s.base-hex ?b) ? (not ?b))
+      (err "unexpected end of number following hex indicator char")
+      
+      ;; --- digit ---
+      (s.digit 45) (err "unexpected hyphen following digit")
+      (s.digit 46) s.dec-point
+      ((s.digit b) ? (digit-char? b)) s.digit
+      ((s.digit b) ? (exponent-char? b)) s.exp
+
+      ((s.digit b) ? (hex-letter-digit-char? b))
+      (err "unexpected hex digit in non-hex number")
+
+      ((s.digit b) ? (hex-indicator-char? b))
+      (err "unexpected hex indicator char following digit")
+
+      ;; --- dec-digit ---
+      (s.dec-digit 46) (err "unexpected second decimal point")
+      ((s.dec-digit b) ? (digit-char? b)) s.dec-digit
+      
+      ;; reuse s.digit state for all other cases
+      (s.dec-digit ?b) (number-collector-state-machine err s.digit ?b)
+      
+      ;; --- hex-digit ---
+      (s.hex-digit 45) (err "unexpected hyphen following digit")
+      (s.hex-digit 46) s.hex-dec-point
+      ((s.hex-digit b) ? (hex-digit-char? b)) s.hex-digit
+
+      ((s.hex-digit b) ? (hex-indicator-char? b))
+      (err "unexpected hex indicator char following digit")
+
+      ;; --- hex-dec-digit ---
+      (s.hex-dec-digit 46) (err "unexpected second decimal point")
+      ((s.hex-dec-digit b) ? (digit-char? b)) s.hex-dec-digit
+      
+      ;; reuse s.hex-digit state for all other cases
+      (s.hex-dec-digit ?b) (number-collector-state-machine err s.hex-digit ?b)
+
+      ;; --- exp ---
+      (s.exp 45) s.exp-negate
+      ((s.exp b) ? (digit-char? b)) s.exp-digit
+      (s.exp b) (err-unexpected-char b "following exponent char")
+
+      ((s.exp ?b) ? (not ?b))
+      (err "unexpected end of number following exponent char")
+      
+      ;; --- exp-negate ---
+      ((s.exp-negate b) ? (digit-char? b)) s.exp-digit
+      (s.exp-negate b) (err-unexpected-char b "following exponent hyphen char")
+
+      ((s.exp-negate ?b) ? (not ?b))
+      (err "unexpected end of number following exponent hyphen char")
+
+
+      ;; --- exp-digit ---
+      ((s.exp-digit b) ? (digit-char? b)) s.exp-digit
+
+      (s.exp-digit b)
+      (err "unexpected char \"" (string.char b) "\" following exponent digit char")
+      
+      ((_ ?b) ? (or (not ?b) (whitespace? ?b) (delim? ?b))) s.end
+      
+      ;; catch all other states
+      _ (err-invalid-number-character err state byte))))
+
+(fn collect-number [collect? cursor err state chars chars-i]
+  
+  (let [s number-collector-states
+        byte (cursor.peek)
+        new-state (number-collector-state-machine err state byte)]
+    (if (= new-state s.end) chars
+        (do (when collect? (tset chars chars-i (cursor.take)))
+            (collect-number collect? cursor err new-state chars (+ chars-i 1))))))
+
+(collector number-collector [collect? cursor provided-err]
+  (let [s number-collector-states
+        chars (when collect? [])
+        err #(provided-err (.. "malformed number: " $1))]
+    (collect-number collect? cursor provided-err s.start (when collect? []) 1)))
+#+END_SRC
+
+**** Tests :noexport:
+
+#+BEGIN_SRC fennel :tangle test.fnl
+(describe
+ "number collector"
+ #(let [{:streams {: stateful-string-stream : create-cursor}
+         : number-collector} (require :fennel-the-book)
+        collect-number #(-> $ stateful-string-stream create-cursor (number-collector.take-string error))]
+    (it "should parse a number"
+        #(let [s "12345"] (assert.are.equal s (collect-number s))))
+    (it "should parse a negative number"
+        #(let [s "-12345"] (assert.are.equal s (collect-number s))))
+    (it "should stop parsing a number when it ends"
+        #(assert.are.equal "12345" (collect-number "12345 some words")))
+    (it "should parse a number with a decimal point"
+        #(let [s "123.45"] (assert.are.equal s (collect-number s))))
+    (it "should parse a negative number"
+        #(let [s "-123.45"] (assert.are.equal s (collect-number s))))
+    (it "should parse a hexadecimal number"
+        #(let [s "0xabc123"] (assert.are.equal s (collect-number s))))
+    (it "should parse a hexadecimal number with a decimal point"
+        #(let [s "0xabc123.def456"] (assert.are.equal s (collect-number s) )))
+    (it "should parse a negative hexadecimal number with a decimal point"
+        #(let [s "-0xabc123.def456"] (assert.are.equal s (collect-number s))))
+    (it "should parse a number with an exponent"
+        #(let [s "1.514e10"] (assert.are.equal s (collect-number s))))
+    (it "should parse a number with a negative exponent"
+        #(let [s "1.514e-10"] (assert.are.equal s (collect-number s))))
+
+    (it "should not allow non-digits"
+        #(assert.has.error #(collect-number "123z456") "invalid char in number: z\tchar value: 122"))
+    (it "should not a allow a number to end with a hexadecimal indicator"
+        #(assert.has.error #(collect-number "0x") "unexpected end of number following hex indicator char"))
+    (it "should not allow a number to end with an exponent indicator"
+        #(assert.has.error #(collect-number "1.514e") "unexpected end of number following exponent char"))
+    (it "should not allow a number to end with an exponent hyphen"
+        #(assert.has.error #(collect-number "1.514e-") "unexpected end of number following exponent hyphen char"))
+    (it "should not allow a number to contain two decimal points"
+        #(assert.has.error #(collect-number "1.514.625") "unexpected second decimal point"))
+    (it "should not allow a hexadecimal number to contain two decimal points"
+        #(assert.has.error #(collect-number "0xa1.b2.c3") "unexpected second decimal point"))
+    (it "should not allow a hex indicator character to come in the middle of a number"
+        #(assert.has.error #(collect-number "01xabc2") "unexpected hex indicator char following digit"))
+    ))
+#+END_SRC
+
+**** DONE COMMENT use an integer enum instead of a string for the collector state
+**** COMMENT attempted rewrite
+#+BEGIN_SRC fennel
+;; attempted rewrite of state machine before realizing it wouldn't
+;; automatically skip the expected end of the number
+
+(match state
+  s.start
+  (match byte
+    45 s.negate
+    46 s.dec-point
+    48 s.leading-0
+    (b ? (digit-char? b)) s.digit
+    (b ? (exponent-char? b)) (err "unexpected leading exponent char")
+    (b ? (hex-indicator-char? b)) (err "unexpected leading hex indicator char"))
+
+  s.negate
+  (match byte
+    46 s.dec-point
+    48 s.leading-0
+    (b ? (digit-char? b)) s.digit
+    _ (err-unexpected-char err byte "following negation char"))
+
+  s.dec-point
+  (match byte
+    (b ? (exponent-char? b)) s.exp
+    (b ? (digit-char? b)) s.dec-digit
+    _ (err-unexpected-char err byte "following decimal point"))
+
+  s.leading-0
+  (match byte
+    45 (err "unexpected hyphen following leading zero")
+    46 s.dec-point
+    (b ? (digit-char? b)) s.digit
+    (b ? (exponent-char? b)) s.exp
+    (b ? (hex-indicator-char? b)) s.base-hex)
+
+  s.base-hex
+  (match byte
+    46 s.hex-dec-point
+    (b ? (hex-digit-char? b)) s.hex-digit
+    (?b ? (not ?b)) (err "unexpected end of number following hex indicator char")
+    _ (err-unexpected-char err byte "following hex indicator char"))
+
+  s.hex-dec-point
+  (match byte
+    (b ? (hex-digit-char? b)) s.hex-dec-digit
+    _ (number-collector-state-machine err s.dec-point byte))
+
+  s.digit
+  (match byte
+    45 (err "unexpected hyphen following digit")
+    46 s.dec-point
+    (b ? (digit-char? b)) s.digit
+    (b ? (exponent-char? b)) s.exp)
+  )
+#+END_SRC
+
+*** Collector output :noexport:
+#+BEGIN_SRC fennel :noweb yes :noweb-ref collectors
+<<get-collector>>
+<<collector>>
+
+<<whitespace-collector>>
+<<comment-collector>>
+<<string-collector>>
+
+<<delims>>
+<<symbol-char?>>
+<<symbol-collector>>
+<<keyword-string-collector>>
+
+<<number-collector>>
+#+END_SRC
+
+
+** Building the Tokenizer
+Our tokenizer will take a stream of bytes and, using the collectors
+already defined, output a stream of tokens.
+
+#+BEGIN_SRC fennel :noweb-ref tokenizer
+(local prefixes {96 :quote 44 :unqote 39 :quote 35 :hashfn})
+
+(fn check-for-number [cursor b]
+  (or (digit-char? b) ;; leading digits always indicate a number
+      (let [b2 (cursor.peek-at 2)]
+        (or (and (or (= b 45) (= b 46)) (digit-char? b2)) ;; e.g. -1 or .1
+            (let [b3 (cursor.peek-at 3)]
+              (and (= b 45) (= b2 46) (digit-char? b3))))))) ;; e.g. -.1
+
+(fn check-for-prefix [cursor b]
+  (and (. prefixes b)
+       (let [next-b (cursor.peek-at 2)]
+         (not (or (whitespace? next-b)
+                  (= (type (. delims next-b)) :boolean))))))
+
+(fn take-token [cursor err]
+  (let [tts token-types]
+    (match (cursor.peek)
+      34 (values tts.str (string-collector.take-string cursor err))
+
+      (b ? (check-for-number cursor b))
+      (values tts.number (number-collector.take-string cursor err))
+
+      (b ? (= (type (. delims b)) :number))
+      (values tts.opener (string.char (cursor.take)))
+
+      (b ? (. delims b))
+      (values tts.closer (string.char (cursor.take)))
+
+      (b ? (whitespace? b))
+      (values tts.whitespace (whitespace-collector.take-string cursor err))
+
+      59 ;; the ; character
+      (values tts.comment (comment-collector.take-string cursor err))
+
+      (b ? (check-for-prefix cursor b))
+      (values tts.prefix (string.char (cursor.take)))
+
+      (b ? (= b 58) (let [next-b (cursor.peek-at 2)] (symbol-char? next-b)))
+      (values tts.kw-str (keyword-string-collector.take-string cursor err))
+      
+      (b ? (symbol-char? b))
+      (values tts.symbol (symbol-collector.take-string cursor err))
+
+      b (let [(b1 b2 b3) (cursor.peek-at 1 3)]
+          (err (.. "unrecognized byte sequence [" b1 " " b2 " " b3 "] "
+                   "\"" (string.char b1 b2 3) "\""))))))
+
+(fn chunk-stream->byte-stream [chunks-stream]
+  nil)
+
+(fn byte-stream->token-stream [bytes-stream]
+  (let [cursor (create-cursor bytes-stream)]
+    (fn [] (when (cursor.peek) (take-token cursor (fn [...] (error ...)))))))
+
+(fn granulate [get-chunk]
+  (var chunk "")
+  (var index 1)
+  (var done false)
+  (values
+   (fn [parser-state]
+     (if done nil
+
+         (<= index (length chunk))
+         (let [byte (chunk:byte index)]
+           (set index (+ index 1))
+           byte)
+
+         (do (set chunk (get-chunk parser-state))
+             (if (or (not chunk) (= chunk ""))
+                 (set done true)
+
+                 (do (set index 2)
+                     (chunk:byte 1))))))
+   (fn [] (set chunk ""))))
+
+;; (let [chunk-size 8000
+;;       f (assert (io.open "/home/benaiah/dev/fennel-the-book/fennel-the-book.fnl"))
+;;       chunk-stream #(f:read chunk-size)
+;;       byte-stream (granulate chunk-stream)
+;;       token-stream (byte-stream->token-stream byte-stream)]
+;;   (var done false)
+;;   (while (not done)
+;;     (let [(token-type token-string) (token-stream)]
+;;       (if (and (not= token-type nil) (not= token-string nil))
+;;           (let [escaped (-> token-string (: :gsub "\\" "\\\\") (: :gsub "\n" "\\n"))]
+;;             (lua ";")
+;;             (: io.stdout :write (. token-types token-type) "\t\"" escaped "\"\n"))
+;;           (set done true)))))
+
+#+END_SRC
+
+* COMMENT Tools
+** TODO ~fennel-fmt~
+#+BEGIN_SRC fennel
+#+END_SRC
+
+** TODO ~fawk~
 #+BEGIN_SRC fennel :noweb tangle :tangle fawk.fnl
 (local fs "\n")
 #+END_SRC
-
 * Misc.
 ** Hashbang
 To allow the file to be run as an executable on Linux, we add a
@@ -373,6 +1301,22 @@ line as a comment if it is the very first thing in the file.
 #+END_SRC
 
 ** Utils
+#+BEGIN_SRC fennel :tangle utils.fnl
+
+#+END_SRC
+
+** Tests
+*** TODO COMMENT Set up tests
+* Book tooling
+This section contains Fennel tooling used to create this book.
+
+** JS for HTML output
+#+BEGIN_SRC fennel :tangle fennel-the-book-html-script.fnl
+(: js.global.console :log :hello-world)
+(: js.global :alert "hello")
+(: js.global.console :log js.global)
+nil
+#+END_SRC
 
 ** Org table helper
 #+BEGIN_SRC fennel :tangle org-table-helpers.fnl
@@ -472,23 +1416,28 @@ line as a comment if it is the very first thing in the file.
     (.. "(" (table.concat processed-rows " ") ")")))
 #+END_SRC
 
-** Utils
-#+BEGIN_SRC fennel :tangle utils.fnl
-
-#+END_SRC
-
-** Tests
-*** TODO Set up tests :noexport:
-
 * Output :noexport:
 #+BEGIN_SRC fennel :noweb tangle :tangle fennel-the-book.fnl
 <<hashbang>>
 
-<<string-stream>>
+(local unpack (or unpack table.unpack))
+;; (macro → [...] `(-> ,...))
+
+<<enum>>
+
+<<stateful-string-stream>>
 
 <<create-cursor>>
 
 <<token-types>>
 
-{:streams {: string-stream : create-cursor} : token-types}
+<<collectors>>
+
+<<tokenizer>>
+
+{:streams {: stateful-string-stream : create-cursor}
+ : token-types
+ : string-collector
+ : number-collector
+ }
 #+END_SRC
