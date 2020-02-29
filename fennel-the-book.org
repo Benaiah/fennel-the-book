@@ -322,8 +322,8 @@ original stream.
           (let [old-item (buffer-get i)]
             old-item)))
 
-    ;; Tail recursive peek-at lets us peek ahead multiple values
-    ;; without allocating a table each time
+    ;; Tail recursive peek lets us peek ahead multiple values without
+    ;; allocating a table each time
     (local fennelview (require :fennelview))
     (fn peek [a b]
       (let [(i n) (match (values a b)
