@@ -1454,11 +1454,11 @@ already defined, output a stream of tokens.
                             tts.symbol symbol-reader)))
 
 (fn take-token [cursor]
-  (let [(tag n) (fennel-tagged-reader.readn-tagged cursor.peek)]
+  (let [n (fennel-tagged-reader.readn cursor.peek)]
     (if (> n 0) (fennel-tagged-reader.read-bytes-tagged cursor)
         (let [(b1 b2 b3) (cursor.peek 3)]
           (error (.. "unrecognized byte sequence [" b1 " " b2 " " b3 "] "
-                   "\"" (string.char b1 b2 b3) "\""))))))
+                     "\"" (string.char b1 b2 b3) "\""))))))
 
 (fn granulate [get-chunk]
   (var chunk "")
