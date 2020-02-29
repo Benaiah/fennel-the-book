@@ -713,7 +713,7 @@ containing a few functions which collect tokens in different ways. All
 the functions take the same argument. Named ~peek~, it should be a
 function that allows the reader to check the values of bytes relative
 to the cursor's current position. We'll be using ~cursor.peek~ defined
-above. The functions provided by a reader are the following:
+above.
 
 - ~readn~ - takes a ~peek~ function, and uses it to check how many bytes
   it should read. Returns 0 if the reader cannot read a token at the
@@ -725,24 +725,17 @@ above. The functions provided by a reader are the following:
   as a string (using ~string.char~, which is unfortunately not UTF-8
   aware).
 
+
 We can use a function which takes a ~readn~ function as an argument to
 generate a reader with all the functions just described :
 
 #+BEGIN_SRC fennel :noweb-ref create-reader
 (fn create-reader [readn]
   (fn read-bytes [cursor]
-    (let [n-to-take (readn cursor.peek)]
-      (cursor.take n-to-take)))
+    (let [n (readn cursor.peek)] (cursor.take n)))
   (fn read-string [cursor]
     (-> cursor read-bytes string.char))
   {: readn : read-bytes : read-string})
-#+END_SRC
-
-Then, using a simple macro, we can build a reader just like we do a
-function:
-
-#+BEGIN_SRC fennel :noweb-ref reader
-(macro reader [name ...] `(local ,name (create-reader (fn ,...))))
 #+END_SRC
 
 This allows us to construct readers as follows:
@@ -750,32 +743,74 @@ This allows us to construct readers as follows:
 #+BEGIN_SRC fennel
 ;; Example - not a part of the source code!
 
-(reader example-reader [peek]
-  ;; - peek is a cursor's peek function
+(create-reader
+ (fn [peek]
+   ;; - peek is a cursor's peek function
 
-  ;; This is a normal fennel function body. Its return value should be
-  ;; 0 if the reader cannot currently take a token, or a number of
-  ;; bytes to take for the next token.
-  )
+   ;; This is a normal fennel function body. Its return value should be
+   ;; 0 if the reader cannot currently take a token, or a number of
+   ;; bytes to take for the next token.
+   )
 #+END_SRC
 
 We can compose readers by running them in sequence, then using the
 first reader that returns a token size greater than 0.
 
-#+BEGIN_SRC fennel :noweb-ref compose-readers
-(fn compose-readers [...]
-  (let [readers [...]
-        readers-len (length readers)
-        readn
-        (fn [peek]
-          (var ret nil)
-          (var reader-i 1)
-          (while (and (= ret nil) (<= reader-i readers-len))
-            (let [n-to-read (reader.readn peek)]
-              (when (> n-to-read 0)
-                (set ret n-to-read))))
-          ret)]
-    (create-reader readn)))
+#+BEGIN_SRC fennel :noweb-ref compose-tagged-readers
+(fn split-alternating [tab]
+  (let [odds [] evens []]
+    (each [i val (ipairs tab)]
+      (if (= 1 (% i 2))
+          (tset odds (-> i (- 1) (/ 2) (+ 1)) val)
+          (tset evens (/ i 2) val)))
+    (values odds evens)))
+
+(fn compose-tagged-readers [...]
+  (let [(tags readers) (split-alternating [...])
+        readn-tagged-inner
+        (fn readn-tagged-inner [peek i]
+          (let [tag (. tags i) reader (. readers i)]
+            (if (= reader nil) (values nil 0)
+                (let [n (reader.readn peek)]
+                  (if (> n 0) (values tag n)
+                      (readn-tagged-inner peek (+ i 1)))))))
+        readn-tagged (fn [peek] (readn-tagged-inner peek 1))
+        read-bytes-tagged
+        (fn [cursor]
+          (let [(tag n) (readn-tagged cursor.peek)]
+            (values tag (cursor.take n))))
+        read-string-tagged-inner
+        (fn [tag ...]
+          (values tag (string.char ...)))
+        read-string-tagged
+        (fn [cursor]
+          (read-string-tagged-inner (read-bytes-tagged cursor)))
+        readn (fn [peek] (select 2 (readn-tagged peek)))
+        {: read-bytes : read-string} (create-reader readn)]
+    {: readn
+     : read-bytes
+     : read-string
+     : readn-tagged
+     : read-bytes-tagged
+     : read-string-tagged}))
+#+END_SRC
+
+#+BEGIN_SRC fennel :tangle test.fnl
+(describe "compose-tagged-readers"
+  #(let [{:streams {: stateful-string-stream : create-cursor}
+          :readers {: whitespace-reader : symbol-reader : keyword-string-reader}
+         : compose-tagged-readers} (require :fennel-the-book)]
+     (it "should compose readers"
+       #(let [composed-reader (compose-tagged-readers 1 whitespace-reader
+                                                      2 symbol-reader
+                                                      3 keyword-string-reader)
+              s " sym :kw-string sym-2 :another-kw-string"
+              cursor (create-cursor (stateful-string-stream s))]
+          (assert.are.same [1 1] [(composed-reader.readn-tagged cursor.peek)])
+          (assert.are.same [32] [(composed-reader.read-bytes cursor)])
+          (assert.are.same [2 115 121 109] [(composed-reader.read-bytes-tagged cursor)])
+          (assert.are.same [1 " "] [(composed-reader.read-string-tagged cursor)])
+          (assert.are.same [3 ":kw-string"] [(composed-reader.read-string-tagged cursor)])))))
 #+END_SRC
 
 *** TODO COMMENT Test/provide UTF-8 aware string reconstitution
@@ -820,7 +855,7 @@ as any of the following bytes:
         (read-whitespace peek (+ n 1))
         (- n 1))))
 
-(reader whitespace-reader [peek] (read-whitespace peek))
+(local whitespace-reader (create-reader (fn [peek] (read-whitespace peek))))
 #+END_SRC
 
 #+BEGIN_SRC fennel :tangle test.fnl
@@ -856,7 +891,7 @@ semicolon (value 59) and then get all the bytes until the next newline
             (and (not= n 1) (= peeked 10))) (- n 1)
         (read-comment peek (+ n 1)))))
 
-(reader comment-reader [peek] (read-comment peek))
+(local comment-reader (create-reader (fn [peek] (read-comment peek))))
 #+END_SRC
 
 #+BEGIN_SRC fennel :tangle test.fnl
@@ -929,7 +964,6 @@ And another function to check for digits, which cannot begin a symbol:
 (fn disallowed-symbol-starter? [b]
   (or (not (symbol-char? b))
       (digit-char? b)
-      (= b 46) ; .
       ))
 #+END_SRC
 
@@ -941,10 +975,12 @@ easily:
   (let [n (or n 1)
         char (peek n 1)]
     (if (and (= n 1) (disallowed-symbol-starter? char)) 0
+        ;; a colon followed by symbol chars is a keyword string
+        (and (= n 1) (= char 58) (symbol-char? (peek (+ n 1) 1))) 0
         (symbol-char? char) (read-symbol peek (+ n 1))
         (- n 1))))
 
-(reader symbol-reader [peek] (read-symbol peek))
+(local symbol-reader (create-reader (fn [peek] (read-symbol peek))))
 #+END_SRC
 
 #+BEGIN_SRC fennel :tangle test.fnl
@@ -978,7 +1014,7 @@ just defined to collect the string after skipping the initial ~:~ character.
         (and (> n 1) (not (symbol-char? (peek n 1)))) (- n 1)
         (read-keyword-string peek (+ n 1)))))
 
-(reader keyword-string-reader [peek] (read-keyword-string peek))
+(local keyword-string-reader (create-reader (fn [peek] (read-keyword-string peek))))
 #+END_SRC
 
 #+BEGIN_SRC fennel :tangle test.fnl
@@ -1031,14 +1067,14 @@ as follows:
               new-n (or override-n (+ n 1))]
           (read-string peek new-n new-state)))))
 
-(reader string-reader [peek] (read-string peek))
+(local string-reader (create-reader (fn [peek] (read-string peek))))
 #+END_SRC
 
 **** Tests :noexport:
 #+BEGIN_SRC fennel :tangle test.fnl
 (describe "string reader"
   #(let [{:streams {: create-string-cursor}
-          : string-reader} (require :fennel-the-book)
+          :readers {: string-reader}} (require :fennel-the-book)
          read-string #(-> $ create-string-cursor string-reader.read-string)]
      (it "should parse a normal string containing whitespace"
        #(let [s "\"just some old regular string \r\n with some whitespace in\""]
@@ -1103,9 +1139,13 @@ those explicitly listed will result in an error):
 (fn hex-digit-char? [b] (or (digit-char? b) (hex-letter-digit-char? b)))
 (fn exponent-char? [b] (or (= b 69) (= b 101)))
 (fn hex-indicator-char? [b] (or (= b 88) (= b 120)))
+(fn number-char? [b]
+  (or (digit-char? b)
+      (= b 46) ; 0
+      ))
 
 (fn err-unexpected-char [b message]
-  (error (.. "unexpected char \"" (string.char b) "\" " message)))
+  (error (.. "malformed number: unexpected char \"" (string.char b) "\" " message)))
 
 (local number-reader-states
   (enum start negate dec-point hex-dec-point
@@ -1118,7 +1158,7 @@ those explicitly listed will result in an error):
            "\tbyte: " (or b "<nil>") "\tchar: " (or (string.char b) "<nil>"))))
 
 (fn err-invalid-number-character [state b]
-  (error (.. "invalid char in number: " (string.char b) "\tchar value: " 122)))
+  (error (.. "invalid char in number: " (string.char b) "\tchar value: " b)))
 
 ;; takes a state and byte (which can potentially be nil) and returns a
 ;; new state. returning :end will end the collection loop, ignoring
@@ -1134,10 +1174,10 @@ those explicitly listed will result in an error):
       ((s.start b) ? (digit-char? b)) s.digit
 
       ((s.start b) ? (exponent-char? b))
-      (error "unexpected leading exponent char")
+      (error "malformed number: unexpected leading exponent char")
 
       ((s.start b) ? (hex-indicator-char? b))
-      (error "unexpected leading hex indicator char")
+      (error "malformed number: unexpected leading hex indicator char")
 
       ;; --- negate ---
       (s.negate 46) s.dec-point
@@ -1230,23 +1270,32 @@ those explicitly listed will result in an error):
       ;; catch all other states
       _ (err-invalid-number-character state byte))))
 
-(fn read-number [peek n state]
-  (let [s number-reader-states
-        n (or n 1)
-        state (or state s.start)
-        char (peek n 1)
-        new-state (number-reader-state-machine state char)]
-    (if (= new-state s.end) (- n 1)
-        (read-number peek (+ n 1) new-state))))
+(fn check-for-number [peek]
+  (let [b (peek)]
+    (or (digit-char? b) ;; leading digits always indicate a number
+        (let [b2 (peek 2 1)]
+          (or (and (or (= b 45) (= b 46)) (digit-char? b2)) ;; e.g. -1 or .1
+              (let [b3 (peek 3 1)]
+                (and (= b 45) (= b2 46) (digit-char? b3)))))))) ;; e.g. -.1
 
-(reader number-reader [peek] (read-number peek))
+(fn read-number [peek n state]
+  (let [n (or n 1)]
+    (if (and (= n 1) (not (check-for-number peek))) 0
+        (let [s number-reader-states
+              state (or state s.start)
+              char (peek n 1)
+              new-state (number-reader-state-machine state char)]
+          (if (= new-state s.end) (- n 1)
+              (read-number peek (+ n 1) new-state))))))
+
+(local number-reader (create-reader (fn [peek] (read-number peek))))
 #+END_SRC
 
 **** Tests :noexport:
 #+BEGIN_SRC fennel :tangle test.fnl
 (describe "number reader"
   #(let [{:streams {: stateful-string-stream : create-cursor}
-          : number-reader} (require :fennel-the-book)
+          :readers {: number-reader}} (require :fennel-the-book)
          read-number #(-> $ stateful-string-stream create-cursor (number-reader.read-string error))]
      (it "should parse a number"
        #(let [s "12345"] (assert.are.equal s (read-number s))))
@@ -1348,6 +1397,7 @@ those explicitly listed will result in an error):
 #+BEGIN_SRC fennel :noweb yes :noweb-ref readers
 <<create-reader>>
 <<reader>>
+<<compose-tagged-readers>>
 
 <<whitespace-reader>>
 <<comment-reader>>
@@ -1369,58 +1419,42 @@ already defined, output a stream of tokens.
 #+BEGIN_SRC fennel :noweb-ref tokenizer
 (local prefixes {96 :quote 44 :unqote 39 :quote 35 :hashfn})
 
-(fn check-for-number [cursor b]
-  (or (digit-char? b) ;; leading digits always indicate a number
-      (let [b2 (cursor.peek-at 2)]
-        (or (and (or (= b 45) (= b 46)) (digit-char? b2)) ;; e.g. -1 or .1
-            (let [b3 (cursor.peek-at 3)]
-              (and (= b 45) (= b2 46) (digit-char? b3))))))) ;; e.g. -.1
+(local prefix-reader
+  (create-reader (fn [peek]
+                   (if (and (. prefixes (peek))
+                            (let [next-b (peek 2 1)]
+                              (not (or (whitespace? next-b)
+                                       (= (type (. delims next-b)) :boolean))))) 1
+                       0))))
 
-(fn check-for-prefix [cursor b]
-  (and (. prefixes b)
-       (let [next-b (cursor.peek-at 2)]
-         (not (or (whitespace? next-b)
-                  (= (type (. delims next-b)) :boolean))))))
+(local opener-reader
+  (create-reader (fn [peek]
+                   (if (= (type (. delims (peek))) :number) 1
+                       0))))
 
-(fn take-token [cursor err]
+(local closer-reader
+  (create-reader (fn [peek]
+                   (if (= (. delims (peek)) true) 1
+                       0))))
+
+(local fennel-tagged-reader
   (let [tts token-types]
-    (match (cursor.peek)
-      34 (values tts.str (string-reader.read-string cursor err))
+    (compose-tagged-readers tts.str string-reader
+                            tts.number number-reader
+                            tts.opener opener-reader
+                            tts.closer closer-reader
+                            tts.whitespace whitespace-reader
+                            tts.comment comment-reader
+                            tts.prefix prefix-reader
+                            tts.kw-str keyword-string-reader
+                            tts.symbol symbol-reader)))
 
-      (b ? (check-for-number cursor b))
-      (values tts.number (number-reader.read-string cursor err))
-
-      (b ? (= (type (. delims b)) :number))
-      (values tts.opener (string.char (cursor.take)))
-
-      (b ? (. delims b))
-      (values tts.closer (string.char (cursor.take)))
-
-      (b ? (whitespace? b))
-      (values tts.whitespace (whitespace-reader.read-string cursor err))
-
-      59 ;; the ; character
-      (values tts.comment (comment-reader.read-string cursor err))
-
-      (b ? (check-for-prefix cursor b))
-      (values tts.prefix (string.char (cursor.take)))
-
-      (b ? (= b 58) (let [next-b (cursor.peek-at 2)] (symbol-char? next-b)))
-      (values tts.kw-str (keyword-string-reader.read-string cursor err))
-
-      (b ? (symbol-char? b))
-      (values tts.symbol (symbol-reader.read-string cursor err))
-
-      b (let [(b1 b2 b3) (cursor.peek-at 1 3)]
-          (err (.. "unrecognized byte sequence [" b1 " " b2 " " b3 "] "
-                   "\"" (string.char b1 b2 3) "\""))))))
-
-(fn chunk-stream->byte-stream [chunks-stream]
-  nil)
-
-(fn byte-stream->token-stream [bytes-stream]
-  (let [cursor (create-cursor bytes-stream)]
-    (fn [] (when (cursor.peek) (take-token cursor (fn [...] (error ...)))))))
+(fn take-token [cursor]
+  (let [(tag n) (fennel-tagged-reader.readn-tagged cursor.peek)]
+    (if (> n 0) (fennel-tagged-reader.read-bytes-tagged cursor)
+        (let [(b1 b2 b3) (cursor.peek 3)]
+          (error (.. "unrecognized byte sequence [" b1 " " b2 " " b3 "] "
+                   "\"" (string.char b1 b2 b3) "\""))))))
 
 (fn granulate [get-chunk]
   (var chunk "")
@@ -1443,19 +1477,28 @@ already defined, output a stream of tokens.
                      (chunk:byte 1))))))
    (fn [] (set chunk ""))))
 
-;; (let [chunk-size 8000
-;;       f (assert (io.open "/home/benaiah/dev/fennel-the-book/fennel-the-book.fnl"))
-;;       chunk-stream #(f:read chunk-size)
-;;       byte-stream (granulate chunk-stream)
-;;       token-stream (byte-stream->token-stream byte-stream)]
-;;   (var done false)
-;;   (while (not done)
-;;     (let [(token-type token-string) (token-stream)]
-;;       (if (and (not= token-type nil) (not= token-string nil))
-;;           (let [escaped (-> token-string (: :gsub "\\" "\\\\") (: :gsub "\n" "\\n"))]
-;;             (lua ";")
-;;             (: io.stdout :write (. token-types token-type) "\t\"" escaped "\"\n"))
-;;           (set done true)))))
+(fn byte-stream->token-stream [bytes-stream]
+  (let [cursor (create-cursor bytes-stream)]
+    (fn [] (when (cursor.peek) (take-token cursor)))))
+
+(fn separate-values-by-spaces [v ...]
+  (when v (values v " " (separate-values-by-spaces ...))))
+
+(fn token-loop [token-stream token-type ...]
+  (when token-type
+    (io.stdout:write (. token-types token-type) "\t"
+                     (string.char ...) "\t"
+                     (separate-values-by-spaces ...))
+    (io.stdout:write "\n")
+    (io.stdout:flush)
+    (token-loop token-stream (token-stream))))
+
+(let [chunk-size 8000
+      f (assert (io.open "/home/benaiah/dev/fennel-the-book/fennel-the-book.fnl"))
+      chunk-stream #(f:read chunk-size)
+      byte-stream (granulate chunk-stream)
+      token-stream (byte-stream->token-stream byte-stream)]
+  (token-loop token-stream (token-stream)))
 
 #+END_SRC
 
@@ -1615,7 +1658,6 @@ nil
 
 * Output :noexport:
 #+BEGIN_SRC fennel :noweb tangle :tangle fennel-the-book.fnl
-<<hashbang>>
 
 (global unpack (or unpack table.unpack))
 ;; (macro → [...] `(-> ,...))
@@ -1637,10 +1679,9 @@ nil
 <<parser>>
 
 {:streams {: stateful-string-stream : create-cursor : create-string-cursor}
- :readers {: whitespace-reader : comment-reader : symbol-reader : keyword-string-reader}
+ :readers {: whitespace-reader : comment-reader : symbol-reader : keyword-string-reader : number-reader : string-reader}
+ : compose-tagged-readers
  : token-types
- : string-reader
- : number-reader
  : token-stream->form-stream
  }
 #+END_SRC
