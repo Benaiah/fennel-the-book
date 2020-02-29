@@ -1393,32 +1393,9 @@ those explicitly listed will result in an error):
   )
 #+END_SRC
 
-*** Reader output :noexport:
-#+BEGIN_SRC fennel :noweb yes :noweb-ref readers
-<<create-reader>>
-<<reader>>
-<<compose-tagged-readers>>
-
-<<whitespace-reader>>
-<<comment-reader>>
-<<string-reader>>
-
-<<delims>>
-<<symbol-char?>>
-<<digit-char?>>
-<<symbol-reader>>
-<<keyword-string-reader>>
-
-<<number-reader>>
-#+END_SRC
-
-** Building the Tokenizer
-Our tokenizer will take a stream of bytes and, using the readers
-already defined, output a stream of tokens.
-
-#+BEGIN_SRC fennel :noweb-ref tokenizer
+*** Other Readers
+#+BEGIN_SRC fennel :noweb-ref other-readers
 (local prefixes {96 :quote 44 :unqote 39 :quote 35 :hashfn})
-
 (local prefix-reader
   (create-reader (fn [peek]
                    (if (and (. prefixes (peek))
@@ -1436,7 +1413,34 @@ already defined, output a stream of tokens.
   (create-reader (fn [peek]
                    (if (= (. delims (peek)) true) 1
                        0))))
+#+END_SRC
 
+*** Reader output :noexport:
+#+BEGIN_SRC fennel :noweb yes :noweb-ref readers
+<<create-reader>>
+<<reader>>
+<<compose-tagged-readers>>
+
+<<whitespace-reader>>
+<<comment-reader>>
+<<string-reader>>
+
+<<delims>>
+<<symbol-char?>>
+<<digit-char?>>
+<<symbol-reader>>
+<<keyword-string-reader>>
+
+<<number-reader>>
+
+<<other-readers>>
+#+END_SRC
+
+** Building the Tokenizer
+Our tokenizer will take a stream of bytes and, using the readers
+already defined, output a stream of tokens.
+
+#+BEGIN_SRC fennel :noweb-ref tokenizer
 (local fennel-tagged-reader
   (let [tts token-types]
     (compose-tagged-readers tts.str string-reader
