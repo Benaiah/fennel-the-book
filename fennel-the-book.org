@@ -1485,25 +1485,28 @@ already defined, output a stream of tokens.
   (let [cursor (create-cursor bytes-stream)]
     (fn [] (when (cursor.peek) (take-token cursor)))))
 
-(fn separate-values-by-spaces [v ...]
-  (when v (values v " " (separate-values-by-spaces ...))))
+(fn separate-values-by-spaces-and-end-with-line [v ...]
+  (if v (values v " " (separate-values-by-spaces-and-end-with-line ...))
+      "\n"))
 
 (fn token-loop [token-stream token-type ...]
   (when token-type
     (io.stdout:write (. token-types token-type) "\t"
-                     (string.char ...) "\t"
-                     (separate-values-by-spaces ...))
-    (io.stdout:write "\n")
-    (io.stdout:flush)
+                     ;(string.char ...) "\t"
+                     (separate-values-by-spaces-and-end-with-line ...))
     (token-loop token-stream (token-stream))))
 
-(let [chunk-size 8000
-      f (assert (io.open "/home/benaiah/dev/fennel-the-book/fennel-the-book.fnl"))
-      chunk-stream #(f:read chunk-size)
-      byte-stream (granulate chunk-stream)
-      token-stream (byte-stream->token-stream byte-stream)]
-  (token-loop token-stream (token-stream)))
+(fn tokenize-self []
+  (let [chunk-size 8000
+        f (assert (io.open "/home/benaiah/dev/fennel-the-book/fennel-the-book.fnl"))
+        chunk-stream #(f:read chunk-size)
+        byte-stream (granulate chunk-stream)
+        token-stream (byte-stream->token-stream byte-stream)]
+    token-stream))
 
+(fn print-tokens-of-self []
+  (let [s (tokenize-self)]
+    (token-loop s (s))))
 #+END_SRC
 
 *** TODO COMMENT Rewrite tokenizer to use ~compose-readers~
@@ -1687,5 +1690,7 @@ nil
  : compose-tagged-readers
  : token-types
  : token-stream->form-stream
+ : tokenize-self
+ : print-tokens-of-self
  }
 #+END_SRC
