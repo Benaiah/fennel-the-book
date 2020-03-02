@@ -1004,7 +1004,11 @@ easily:
      (it "shouldn't read a symbol that begins with a digit"
        #(let [s "0abc" cursor (create-string-cursor s)]
           (assert.are.equal 0 (symbol-reader.readn cursor.peek))
-          (assert.are.equal "" (read-symbol-string s))))))
+          (assert.are.equal "" (read-symbol-string s))))
+     (it "should read and recreate UTF-8 symbol"
+         #(let [s "コンニチハ" cursor (create-string-cursor s)]
+            (assert.are.equal 15 (symbol-reader.readn cursor.peek))
+            (assert.are.equal "コンニチハ" (read-symbol-string s))))))
 #+END_SRC
 
 *** Keyword string reader
