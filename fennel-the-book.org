@@ -725,8 +725,7 @@ above.
 - ~read-bytes~ - takes a cursor, which it advances over the next token,
   returning the bytes of that token.
 - ~read-string~ - advances the reader over the next token and returns it
-  as a string (using ~string.char~, which is unfortunately not UTF-8
-  aware).
+  as a string.
 
 
 We can use a function which takes a ~readn~ function as an argument to
