@@ -1675,6 +1675,20 @@ nil
     (.. "(" (table.concat processed-rows " ") ")")))
 #+END_SRC
 
+** Makefile
+
+The makefile is committed to the repo so that ~make tangle~ can be run.
+
+#+BEGIN_SRC makefile :tangle makefile
+.PHONY: tangle
+tangle:
+	emacs --batch --eval "(require 'org)" --eval '(org-babel-tangle-file "fennel-the-book.org")'
+
+.PHONY: test
+test:
+	fennel test.fnl
+#+END_SRC
+
 * Output                                                           :noexport:
 #+BEGIN_SRC fennel :noweb tangle :tangle fennel-the-book.fnl
 
