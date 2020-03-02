@@ -225,6 +225,7 @@ the bytes of a string with the following code:
 #+RESULTS:
 : 97 98 99 nil
 
+*** Tests                                                        :noexport:
 #+BEGIN_SRC fennel :tangle test.fnl
 (describe "stateful-string-stream"
   #(let [{:streams {: stateful-string-stream}} (require :fennel-the-book)]
@@ -419,6 +420,7 @@ a string:
 (fn create-string-cursor [s] (-> s stateful-string-stream create-cursor))
 #+END_SRC
 
+*** Tests                                                        :noexport:
 #+BEGIN_SRC fennel :tangle test.fnl
 (describe
  "create-cursor"
@@ -456,6 +458,7 @@ a string:
     {: peek : peek-at : take}))
 #+END_SRC
 
+*** Tests                                                        :noexport:
 #+BEGIN_SRC fennel :tangle test.fnl
 (describe "create-child-cursor"
   (it "should allow taking from a child cursor" #(let [] nil)))
@@ -795,6 +798,7 @@ first reader that returns a token size greater than 0.
      : read-string-tagged}))
 #+END_SRC
 
+*** Tests                                                        :noexport:
 #+BEGIN_SRC fennel :tangle test.fnl
 (describe "compose-tagged-readers"
   #(let [{:streams {: stateful-string-stream : create-cursor}
@@ -858,6 +862,7 @@ as any of the following bytes:
 (local whitespace-reader (create-reader (fn [peek] (read-whitespace peek))))
 #+END_SRC
 
+**** Tests                                                      :noexport:
 #+BEGIN_SRC fennel :tangle test.fnl
 (describe "whitespace reader"
   #(let [{:streams {: stateful-string-stream : create-cursor}
@@ -894,6 +899,7 @@ semicolon (value 59) and then get all the bytes until the next newline
 (local comment-reader (create-reader (fn [peek] (read-comment peek))))
 #+END_SRC
 
+**** Tests                                                      :noexport:
 #+BEGIN_SRC fennel :tangle test.fnl
 (describe "comment reader"
   #(let [{:streams {: stateful-string-stream : create-cursor}
@@ -983,6 +989,7 @@ easily:
 (local symbol-reader (create-reader (fn [peek] (read-symbol peek))))
 #+END_SRC
 
+**** Tests                                                      :noexport:
 #+BEGIN_SRC fennel :tangle test.fnl
 (describe "symbol reader"
   #(let [{:streams {: create-string-cursor}
@@ -1016,6 +1023,8 @@ just defined to collect the string after skipping the initial ~:~ character.
 
 (local keyword-string-reader (create-reader (fn [peek] (read-keyword-string peek))))
 #+END_SRC
+
+**** Test                                                       :noexport:
 
 #+BEGIN_SRC fennel :tangle test.fnl
 (describe "keyword string reader"
@@ -1070,7 +1079,7 @@ as follows:
 (local string-reader (create-reader (fn [peek] (read-string peek))))
 #+END_SRC
 
-**** Tests :noexport:
+**** Tests                                                      :noexport:
 #+BEGIN_SRC fennel :tangle test.fnl
 (describe "string reader"
   #(let [{:streams {: create-string-cursor}
@@ -1291,7 +1300,7 @@ those explicitly listed will result in an error):
 (local number-reader (create-reader (fn [peek] (read-number peek))))
 #+END_SRC
 
-**** Tests :noexport:
+**** Tests                                                      :noexport:
 #+BEGIN_SRC fennel :tangle test.fnl
 (describe "number reader"
   #(let [{:streams {: stateful-string-stream : create-cursor}
@@ -1552,7 +1561,7 @@ line as a comment if it is the very first thing in the file.
 
 #+END_SRC
 
-** Tests
+** Tests                                                          :noexport:
 *** TODO COMMENT Set up tests
 * Book tooling
 This section contains Fennel tooling used to create this book.
@@ -1663,7 +1672,7 @@ nil
     (.. "(" (table.concat processed-rows " ") ")")))
 #+END_SRC
 
-* Output :noexport:
+* Output                                                           :noexport:
 #+BEGIN_SRC fennel :noweb tangle :tangle fennel-the-book.fnl
 
 (global unpack (or unpack table.unpack))
