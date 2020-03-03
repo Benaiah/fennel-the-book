@@ -1689,6 +1689,19 @@ test:
 	fennel test.fnl
 #+END_SRC
 
+** Gitignore
+
+For the ~.gitignore~, we start by ignoring everything then whitelist the
+specific files we wish to commit:
+
+#+BEGIN_SRC gitignore :tangle .gitignore
+*
+!fennel-the-book.org
+!makefile
+!.gitignore
+#+END_SRC
+
+
 * Output                                                           :noexport:
 #+BEGIN_SRC fennel :noweb tangle :tangle fennel-the-book.fnl
 
