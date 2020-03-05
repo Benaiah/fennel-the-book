@@ -31,8 +31,7 @@ have a comment at the beginning saying so. It will look like this:
 ;; Example - not a part of the source code!
 #+END_SRC
 
-The compiler is a single Fennel file. When a code block is part of a
-different file, it will have a comment at the beginning stating so.
+The compiler itself is a single Fennel file.
 
 Note also that the source code blocks in this book are arranged for
 the purpose of reading, and do not necessarily appear in the same
