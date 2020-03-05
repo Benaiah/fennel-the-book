@@ -522,7 +522,7 @@ number to a string:
 
 #+BEGIN_SRC fennel :noweb-ref token-types
 (local token-types
-       (enum str number symbol kw-str
+       (enum string number symbol keyword-string
              opener closer prefix
              whitespace comment))
 #+END_SRC
@@ -807,13 +807,13 @@ first reader that returns a token size greater than 0.
        #(let [composed-reader (compose-tagged-readers 1 whitespace-reader
                                                       2 symbol-reader
                                                       3 keyword-string-reader)
-              s " sym :kw-string sym-2 :another-kw-string"
+              s " sym :keyword-string sym-2 :another-keyword-string"
               cursor (create-cursor (stateful-string-stream s))]
           (assert.are.same [1 1] [(composed-reader.readn-tagged cursor.peek)])
           (assert.are.same [32] [(composed-reader.read-bytes cursor)])
           (assert.are.same [2 115 121 109] [(composed-reader.read-bytes-tagged cursor)])
           (assert.are.same [1 " "] [(composed-reader.read-string-tagged cursor)])
-          (assert.are.same [3 ":kw-string"] [(composed-reader.read-string-tagged cursor)])))))
+          (assert.are.same [3 ":keyword-string"] [(composed-reader.read-string-tagged cursor)])))))
 #+END_SRC
 
 *** TODO COMMENT Test/provide UTF-8 aware string reconstitution
@@ -822,7 +822,7 @@ see https://github.com/starwing/luautf8
 - [X] whitespace
 - [X] comment
 - [X] symbol
-- [X] kw-string
+- [X] keyword-string
 - [X] string
 - [X] number
 *** DONE COMMENT Write reader tests
@@ -831,7 +831,7 @@ see https://github.com/starwing/luautf8
 - [X] whitespace
 - [X] comment
 - [X] symbol
-- [X] kw-string
+- [X] keyword-string
 - [X] string
 - [X] number
 
@@ -1036,7 +1036,7 @@ just defined to collect the string after skipping the initial ~:~ character.
          read-keyword-string-string
          #(-> $ create-string-cursor keyword-string-reader.read-string)]
      (it "should read a keyword string"
-       #(let [s ":kw-string"]
+       #(let [s ":keyword-string"]
           (assert.are.equal s (read-keyword-string-string s))))))
 #+END_SRC
 
@@ -1455,14 +1455,14 @@ already defined, output a stream of tokens.
 #+BEGIN_SRC fennel :noweb-ref tokenizer
 (local fennel-tagged-reader
   (let [tts token-types]
-    (compose-tagged-readers tts.str string-reader
+    (compose-tagged-readers tts.string string-reader
                             tts.number number-reader
                             tts.opener opener-reader
                             tts.closer closer-reader
                             tts.whitespace whitespace-reader
                             tts.comment comment-reader
                             tts.prefix prefix-reader
-                            tts.kw-str keyword-string-reader
+                            tts.keyword-string keyword-string-reader
                             tts.symbol symbol-reader)))
 
 (fn take-token [cursor]
