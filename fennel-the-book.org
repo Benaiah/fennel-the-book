@@ -495,7 +495,10 @@ use integers instead of strings to represent the token types. To do
 so, we use a table that stores a mapping of string names to their
 corresponding number values and predicate functions. The predicate
 functions let us check the type readably without first converting the
-number to a string:
+number to a string.
+
+First, we'll create a macro that will let us use bare symbols without
+them resolving to variables:
 
 #+BEGIN_SRC fennel :noweb-ref enum
 (global unpack (or unpack table.unpack))
@@ -726,7 +729,6 @@ above.
 - ~read-string~ - advances the reader over the next token and returns it
   as a string.
 
-
 We can use a function which takes a ~readn~ function as an argument to
 generate a reader with all the functions just described :
 
@@ -752,48 +754,6 @@ This allows us to construct readers as follows:
    ;; 0 if the reader cannot currently take a token, or a number of
    ;; bytes to take for the next token.
    )
-#+END_SRC
-
-We can compose readers by running them in sequence, then using the
-first reader that returns a token size greater than 0.
-
-#+BEGIN_SRC fennel :noweb-ref compose-tagged-readers
-(fn split-alternating [tab]
-  (let [odds [] evens []]
-    (each [i val (ipairs tab)]
-      (if (= 1 (% i 2))
-          (tset odds (-> i (- 1) (/ 2) (+ 1)) val)
-          (tset evens (/ i 2) val)))
-    (values odds evens)))
-
-(fn compose-tagged-readers [...]
-  (let [(tags readers) (split-alternating [...])
-        readn-tagged-inner
-        (fn readn-tagged-inner [peek i]
-          (let [tag (. tags i) reader (. readers i)]
-            (if (= reader nil) (values nil 0)
-                (let [n (reader.readn peek)]
-                  (if (> n 0) (values tag n)
-                      (readn-tagged-inner peek (+ i 1)))))))
-        readn-tagged (fn [peek] (readn-tagged-inner peek 1))
-        read-bytes-tagged
-        (fn [cursor]
-          (let [(tag n) (readn-tagged cursor.peek)]
-            (values tag (cursor.take n))))
-        read-string-tagged-inner
-        (fn [tag ...]
-          (values tag (string.char ...)))
-        read-string-tagged
-        (fn [cursor]
-          (read-string-tagged-inner (read-bytes-tagged cursor)))
-        readn (fn [peek] (select 2 (readn-tagged peek)))
-        {: read-bytes : read-string} (create-reader readn)]
-    {: readn
-     : read-bytes
-     : read-string
-     : readn-tagged
-     : read-bytes-tagged
-     : read-string-tagged}))
 #+END_SRC
 
 *** Tests                                                        :noexport:
@@ -1019,8 +979,9 @@ just defined to collect the string after skipping the initial ~:~ character.
 (fn read-keyword-string [peek n]
   (let [n (or n 1)
         char (peek n 1)]
-    (if (and (= n 1) (not= (peek) 58)) 0
-        (and (> n 1) (not (symbol-char? (peek n 1)))) (- n 1)
+    (if (and (= n 1) (not= char 58)) 0
+        (and (= n 2) (not (symbol-char? char))) 0
+        (and (> n 2) (not (symbol-char? char))) (- n 1)
         (read-keyword-string peek (+ n 1)))))
 
 (local keyword-string-reader (create-reader (fn [peek] (read-keyword-string peek))))
@@ -1426,11 +1387,10 @@ those explicitly listed will result in an error):
                        0))))
 #+END_SRC
 
-*** Reader output :noexport:
+*** Reader output                                                :noexport:
 #+BEGIN_SRC fennel :noweb yes :noweb-ref readers
 <<create-reader>>
 <<reader>>
-<<compose-tagged-readers>>
 
 <<whitespace-reader>>
 <<comment-reader>>
@@ -1451,7 +1411,75 @@ those explicitly listed will result in an error):
 Our tokenizer will take a stream of bytes and, using the readers
 already defined, output a stream of tokens.
 
-#+BEGIN_SRC fennel :noweb-ref tokenizer
+To compose different readers together, we will tag each of them with a
+token type. Then, when reading, we will run the ~readn~ of each reader
+sequentially until we find one that returns a value greater than 0. We
+will then return the tag that reader was g iven along with the return
+value of ~readn~. For convenience, we'll also provide similarly tagged
+versions of ~read-bytes~ and ~read-string~.
+
+First, we need a function that will split a series
+of arguments into two tables, one for the odd arguments and one for
+the even arguments. This will allow us to iterate through both tables
+and match the arguments up into pairs. We can implement this
+recursively:
+
+#+BEGIN_SRC fennel :noweb-ref split-values-alternating
+(local split-values-alternating
+  (do
+    ;; We use a do block to keep split-values-alternating-recursively
+    ;; from being visible outside of split-values-alternating.
+    (fn split-values-alternating-recursively [odds evens i odd even ...]
+      (tset odds i odd)
+      (tset evens i even)
+      (if (> (select :# ...) 0)
+          ;; If there are arguments left, recurse.
+          (split-values-alternating-recursively odds evens (+ i 1) ...)
+
+          ;; If there are no arguments left, return the two tables of
+          ;; odd and even arguments.
+          (values odds evens)))
+
+    ;; This function allows us to set default arguments for
+    ;; split-values-alternating-recursively to use for the first
+    ;; iteration.
+    (fn [...] (split-values-alternating-recursively [] [] 1 ...))))
+#+END_SRC
+
+Now that we have that function, we can
+
+#+BEGIN_SRC fennel :noweb-ref compose-tagged-readers
+(fn compose-tagged-readers [...]
+  (let [(tags readers) (split-values-alternating ...)
+        readn-tagged-inner
+        (fn readn-tagged-inner [peek i]
+          (let [tag (. tags i) reader (. readers i)]
+            (if (= reader nil) (values nil 0)
+                (let [n (reader.readn peek)]
+                  (if (> n 0) (values tag n)
+                      (readn-tagged-inner peek (+ i 1)))))))
+        readn-tagged (fn [peek] (readn-tagged-inner peek 1))
+        read-bytes-tagged
+        (fn [cursor]
+          (let [(tag n) (readn-tagged cursor.peek)]
+            (values tag (cursor.take n))))
+        read-string-tagged-inner
+        (fn [tag ...]
+          (values tag (string.char ...)))
+        read-string-tagged
+        (fn [cursor]
+          (read-string-tagged-inner (read-bytes-tagged cursor)))
+        readn (fn [peek] (select 2 (readn-tagged peek)))
+        {: read-bytes : read-string} (create-reader readn)]
+    {: readn
+     : read-bytes
+     : read-string
+     : readn-tagged
+     : read-bytes-tagged
+     : read-string-tagged}))
+#+END_SRC
+
+#+BEGIN_SRC fennel :noweb-ref tokenizer-itself
 (local fennel-tagged-reader
   (let [tts token-types]
     (compose-tagged-readers tts.string string-reader
@@ -1471,7 +1499,7 @@ already defined, output a stream of tokens.
           (error (.. "unrecognized byte sequence [" b1 " " b2 " " b3 "] "
                      "\"" (string.char b1 b2 b3) "\""))))))
 
-(fn granulate [get-chunk]
+(fn chunk-stream->byte-stream [chunk-stream]
   (var chunk "")
   (var index 1)
   (var done false)
@@ -1484,7 +1512,7 @@ already defined, output a stream of tokens.
            (set index (+ index 1))
            byte)
 
-         (do (set chunk (get-chunk parser-state))
+         (do (set chunk (chunk-stream parser-state))
              (if (or (not chunk) (= chunk ""))
                  (set done true)
 
@@ -1495,43 +1523,210 @@ already defined, output a stream of tokens.
 (fn byte-stream->token-stream [bytes-stream]
   (let [cursor (create-cursor bytes-stream)]
     (fn [] (when (cursor.peek) (take-token cursor)))))
-
-(fn separate-values-by-spaces-and-end-with-line [v ...]
-  (if v (values v " " (separate-values-by-spaces-and-end-with-line ...))
-      "\n"))
-
-(fn token-loop [token-stream token-type ...]
-  (when token-type
-    (io.stdout:write (. token-types token-type) "\t"
-                     ;(string.char ...) "\t"
-                     (separate-values-by-spaces-and-end-with-line ...))
-    (token-loop token-stream (token-stream))))
-
-(fn tokenize-self []
-  (let [chunk-size 8000
-        f (assert (io.open "/home/benaiah/dev/fennel-the-book/fennel-the-book.fnl"))
-        chunk-stream #(f:read chunk-size)
-        byte-stream (granulate chunk-stream)
-        token-stream (byte-stream->token-stream byte-stream)]
-    token-stream))
-
-(fn print-tokens-of-self []
-  (let [s (tokenize-self)]
-    (token-loop s (s))))
 #+END_SRC
 
-*** TODO COMMENT Rewrite tokenizer to use ~compose-readers~
+*** DONE COMMENT Rewrite tokenizer to use ~compose-readers~
+*** Tokenizer output                                             :noexport:
+#+BEGIN_SRC fennel :noweb-ref tokenizer :noweb yes
+<<split-values-alternating>>
+<<compose-tagged-readers>>
+<<tokenizer-itself>>
+#+END_SRC
+
 * Parsing
 #+BEGIN_SRC fennel :noweb-ref parser
 (local fennelview (require :fennelview))
+(fn map-stream [f stream] (fn [...] (f (stream ...))))
+(local box-tokens
+  (partial map-stream
+           (fn [token-type first ...]
+             (values token-type (when first [first ...])))))
+
+(global _ENV _ENV)
+(global _G _G)
+(global setfenv setfenv)
+(global loadstring loadstring)
+(fn load-code [code environment filename]
+  (var environment environment)
+  (set environment (or environment _ENV _G))
+  (let [filename (or filename :anonymous)]
+    (if (and setfenv loadstring)
+        (let [f (assert (loadstring code filename))]
+          (setfenv f environment)
+          f)
+        (assert (load code filename :t environment)))))
+
+(fn canonicalize [str]
+  (let [formatted (: str :gsub "[\1-\31]" #(.. "\\" (: $1 :byte)))
+        load-fn (load-code (: "return %s" :format formatted) nil)]
+    (load-fn)))
+
+;; (fn deref [self] (. self 1))
+;; (fn list-to-string [] :TODO)
+
+;; (local SYMBOL_MT {1 :SYMBOL :__tostring deref})
+;; (local EXPR_MT {1 :EXPR :__tostring deref})
+;; (local LIST_MT {1 :LIST :__tostring list-to-string})
+;; (local SEQUENCE_MT [:SEQUENCE])
+
+;; (local VARARG (setmetatable [:...] {1 :VARARG :__tostring deref}))
+;; (fn varg [] VARARG)
+;; (fn varg? [x] (and (= x VARARG) x))
+
+;; (fn list [...] (setmetatable [...] LIST_MT))
+;; (fn list? [x] (and (= :table (type x)) (= LIST_MT (getmetatable x)) x))
+
+
+;; (fn sym [str]
+;;   (let [s {1 str : scope}]
+;;     (each [k v (pairs (or meta {}))]
+;;       (when (= :string (type k))
+;;         (tset s k v)))
+;;     (setmetatable s SYMBOL_MT)))
+
+;; (fn sym? [x] (and (= :table (type x)) (= SYMBOL_MT (getmetatable x)) x))
+
+;; (fn table? [x]
+;;   (and (= :table (type x))
+;;        (not= x VARARG)
+;;        (not= (getmetatable x) LIST_MT)
+;;        (not= (getmetatable x) SYMBOL_MT)
+;;        x))
+
+;; (fn sequence [...]
+;;   (setmetatable [...] SEQUENCE_MT))
+;; (fn sequence? [x]
+;;   (and (= :table (type x))
+;;        (= (getmetatable x) SEQUENCE_MT)
+;;        x))
+
+;; a "form" has the following shape:
+;; [form-type ... values]
+(local form-types (enum symbol string number sequence table list))
+(fn escape-string-for-output [str] (str:gsub "[\1-\31]" #(.. "\\" ($:byte))))
+(fn first-values [first] first)
+(fn rest-values [first ...] ...)
+(fn map-values [fun item ...]
+  (when (not= item nil)
+    (values (fun item) (map-values fun ...))))
+
+(fn concat-strings-with-spaces [first second ...]
+  (if (and (not first) (not second)) (values)
+      (and first (not second)) first
+      (do ;; (print :concat-strings-with-spaces ((require :fennelview) [first second]))
+        (concat-strings-with-spaces (.. first " " second ) ...))))
+
+(var form->string nil)
+
+(fn complex-form->string [form opener closer]
+  ;; (print ((require :fennelview)) {: form : opener : closer})
+  (.. opener
+      (or (concat-strings-with-spaces (map-values form->string (rest-values (unpack form)))) "")
+      closer))
+
+(set form->string
+     (fn form->string [form]
+       (let [ret
+             (match (. form 1)
+               form-types.symbol (. form 2)
+               form-types.string (.. "\"" (escape-string-for-output (. form 2)) "\"")
+               form-types.number (tostring (. form 2))
+
+               form-types.list (complex-form->string form "(" ")")
+               form-types.table (complex-form->string form "{" "}")
+               form-types.sequence (complex-form->string form "[" "]"))]
+         ret)))
+
+(fn create-form [form-type ...] (let [form [form-type ...]] form))
+
+(fn string-form [str] (create-form form-types.string (canonicalize str)))
+(fn string-form-from-bytes [...] (string-form (string.char ...)))
+(fn string-form-from-keyword-string-bytes [colon ...] (create-form form-types.string (string.char ...)))
+(fn number-form-from-bytes [...] (create-form form-types.number (tonumber (string.char ...))))
+(fn symbol-form [str] (create-form form-types.symbol str))
+(fn symbol-form-from-bytes [...] (symbol-form (string.char ...)))
+(fn sequence-form [...] (create-form form-types.sequence ...))
+(fn table-form [...] (create-form form-types.table ...))
+(fn list-form [...] (create-form form-types.list ...))
+
 (fn token-stream->form-stream [token-stream]
-  (let [cursor (create-cursor token-stream)
-        stack []]
-    (fennelview (cursor.peek))))
+  (let [boxed-token-stream (box-tokens token-stream)]
+    (fn take-form [token-stream stack stack-length form-lengths whitespace-since-dispatch prefixed-with]
+      (var should-return nil)
+      (var ret nil)
+      (local stack (or stack []))
+      (local form-lengths (or form-lengths []))
+      (var stack-length (or stack-length 0))
+      (var whitespace-since-dispatch whitespace-since-dispatch)
+      (var prefixed-with prefixed-with)
+      (let [tts token-types
+            (token-type bytes) (boxed-token-stream)
+            dispatch-form
+            (fn [form]
+              (let [form
+                    (if prefixed-with
+                        (let [pw prefixed-with]
+                          (set prefixed-with nil)
+                          (list-form (symbol-form pw) form))
+                        form)]
+                (if (= stack-length 0) (do (set ret form) (set should-return true))
+                    (let [current-form (. stack stack-length)
+                          form-length (. form-lengths stack-length)
+                          next-form-length (+ form-length 1)]
+                      (tset current-form next-form-length form)
+                      (tset form-lengths stack-length next-form-length)))))
+            begin-complex-form
+            (fn [bytes]
+              (let [new-stack-length (+ stack-length 1)
+                    empty-form (match bytes
+                                 [40] (list-form)
+                                 [91] (sequence-form)
+                                 [123] (table-form))]
+                (tset stack new-stack-length empty-form)
+                (tset form-lengths new-stack-length 1)
+                (set stack-length new-stack-length)))
+            end-complex-form
+            (fn [bytes]
+              (when (= stack-length 0)
+                (error (.. "unexpected closing delimiter " (string.char (unpack bytes)))))
+              (let [(expected-form-type expected-closer)
+                    (match bytes
+                      [41] (values form-types.list ")")
+                      [93] (values form-types.sequence "]")
+                      [125] (values form-types.table "}"))
+                    form (. stack stack-length)]
+                (when (not= expected-form-type (. form 1))
+                  (error (.. "unexpected closing delimiter " (string.char (unpack bytes)) ", expected " expected-closer)))
+                (let [finished-complex-form (. stack stack-length)]
+                  (tset stack stack-length nil)
+                  (set stack-length (- stack-length 1))
+                  (dispatch-form finished-complex-form))))
+            begin-prefix
+            (fn [bytes] (set prefixed-with (match bytes [35] :hashfn [44] :unquote [96] :quote)))]
+        (match token-type
+          tts.symbol (dispatch-form (symbol-form-from-bytes (unpack bytes)))
+          tts.string (dispatch-form (string-form-from-bytes (unpack bytes)))
+          tts.keyword-string (dispatch-form (string-form-from-keyword-string-bytes (unpack bytes)))
+          tts.number (dispatch-form (number-form-from-bytes (unpack bytes)))
+          tts.whitespace (set whitespace-since-dispatch true)
+
+          tts.opener (begin-complex-form bytes)
+          tts.closer (end-complex-form bytes)
+          tts.prefix (begin-prefix bytes)
+          nil (set should-return true))
+        (if should-return ret
+            (take-form boxed-token-stream stack stack-length form-lengths whitespace-since-dispatch prefixed-with))))
+    (fn [] (take-form boxed-token-stream))))
+
+(fn string->form-stream [str]
+  (-> str
+      stateful-string-stream
+      byte-stream->token-stream
+      token-stream->form-stream))
 
 ;; (let [chunk-size 8000
 ;;       f (assert (io.open "/home/benaiah/dev/fennel-the-book/fennel-the-book.fnl"))
-;;       token-stream (-> #(f:read chunk-size) granulate byte-stream->token-stream)]
+;;       token-stream (-> #(f:read chunk-size) chunk-stream->byte-stream byte-stream->token-stream)]
 
 ;;   (for [i 1 10]
 ;;      (-> [(token-stream)]
@@ -1693,13 +1888,12 @@ test:
 For the ~.gitignore~, we start by ignoring everything then whitelist the
 specific files we wish to commit:
 
-#+BEGIN_SRC gitignore :tangle .gitignore
+#+BEGIN_SRC text :tangle .gitignore
 *
 !fennel-the-book.org
 !makefile
 !.gitignore
 #+END_SRC
-
 
 * Output                                                           :noexport:
 #+BEGIN_SRC fennel :noweb tangle :tangle fennel-the-book.fnl
@@ -1723,12 +1917,15 @@ specific files we wish to commit:
 
 <<parser>>
 
-{:streams {: stateful-string-stream : create-cursor : create-string-cursor}
+{:streams {: stateful-string-stream : create-cursor : create-string-cursor : map-stream}
  :readers {: whitespace-reader : comment-reader : symbol-reader : keyword-string-reader : number-reader : string-reader}
+ : chunk-stream->byte-stream
  : compose-tagged-readers
  : token-types
+ : byte-stream->token-stream
+ : form-types
  : token-stream->form-stream
- : tokenize-self
- : print-tokens-of-self
+ : string->form-stream
+ : form->string
  }
 #+END_SRC
