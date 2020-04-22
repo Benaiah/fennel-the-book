@@ -324,7 +324,6 @@ original stream.
 
     ;; Tail recursive peek lets us peek ahead multiple values without
     ;; allocating a table each time
-    (local fennelview (require :fennelview))
     (fn peek [a b]
       (let [(i n) (match (values a b)
                     (an-i an-n) (values an-i an-n)
@@ -1535,7 +1534,6 @@ Now that we have that function, we can
 
 * Parsing
 #+BEGIN_SRC fennel :noweb-ref parser
-(local fennelview (require :fennelview))
 (fn map-stream [f stream] (fn [...] (f (stream ...))))
 (local box-tokens
   (partial map-stream
@@ -1560,45 +1558,6 @@ Now that we have that function, we can
   (let [formatted (: str :gsub "[\1-\31]" #(.. "\\" (: $1 :byte)))
         load-fn (load-code (: "return %s" :format formatted) nil)]
     (load-fn)))
-
-;; (fn deref [self] (. self 1))
-;; (fn list-to-string [] :TODO)
-
-;; (local SYMBOL_MT {1 :SYMBOL :__tostring deref})
-;; (local EXPR_MT {1 :EXPR :__tostring deref})
-;; (local LIST_MT {1 :LIST :__tostring list-to-string})
-;; (local SEQUENCE_MT [:SEQUENCE])
-
-;; (local VARARG (setmetatable [:...] {1 :VARARG :__tostring deref}))
-;; (fn varg [] VARARG)
-;; (fn varg? [x] (and (= x VARARG) x))
-
-;; (fn list [...] (setmetatable [...] LIST_MT))
-;; (fn list? [x] (and (= :table (type x)) (= LIST_MT (getmetatable x)) x))
-
-
-;; (fn sym [str]
-;;   (let [s {1 str : scope}]
-;;     (each [k v (pairs (or meta {}))]
-;;       (when (= :string (type k))
-;;         (tset s k v)))
-;;     (setmetatable s SYMBOL_MT)))
-
-;; (fn sym? [x] (and (= :table (type x)) (= SYMBOL_MT (getmetatable x)) x))
-
-;; (fn table? [x]
-;;   (and (= :table (type x))
-;;        (not= x VARARG)
-;;        (not= (getmetatable x) LIST_MT)
-;;        (not= (getmetatable x) SYMBOL_MT)
-;;        x))
-
-;; (fn sequence [...]
-;;   (setmetatable [...] SEQUENCE_MT))
-;; (fn sequence? [x]
-;;   (and (= :table (type x))
-;;        (= (getmetatable x) SEQUENCE_MT)
-;;        x))
 
 ;; a "form" has the following shape:
 ;; [form-type ... values]
