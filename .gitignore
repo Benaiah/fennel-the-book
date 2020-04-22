@@ -1,4 +1,6 @@
 *
 !fennel-the-book.org
 !makefile
+!lib
+!lib/*
 !.gitignore
