@@ -1562,7 +1562,8 @@ Now that we have that function, we can
 ;; a "form" has the following shape:
 ;; [form-type ... values]
 (local form-types (enum symbol string number sequence table list))
-(fn escape-string-for-output [str] (str:gsub "[\1-\31]" #(.. "\\" ($:byte))))
+(fn escape-string-for-output [str]
+  (str:gsub "[\1-\31]" #(.. "\\" ($:byte))))
 
 (fn first-values [first] first)
 (fn rest-values [first ...] ...)
@@ -1576,211 +1577,297 @@ Now that we have that function, we can
       (concat-strings-with-spaces (.. first " " second ) ...)))
 
 (local form->string
-  (do 
+  (do
     (var form->string nil)
     (fn complex-form->string [form opener closer]
       (.. opener
-          (or (concat-strings-with-spaces (map-values form->string (rest-values (unpack form)))) "")
+          (or (concat-strings-with-spaces
+               (map-values form->string (unpack form))) "")
           closer))
     (set form->string
          (fn form->string [form]
-           (let [ret
-                 (match (. form 1)
-                   form-types.symbol (. form 2)
-                   form-types.string (.. "\"" (escape-string-for-output (. form 2)) "\"")
-                   form-types.number (tostring (. form 2))
+           (match form.type
+             form-types.symbol (. form 1)
+             form-types.number (tostring (. form 1))
 
-                   form-types.list (complex-form->string form "(" ")")
-                   form-types.table (complex-form->string form "{" "}")
-                   form-types.sequence (complex-form->string form "[" "]"))]
-             ret)))
+             form-types.string
+             (.. "\"" (escape-string-for-output (. form 1)) "\"")
+
+             form-types.list (complex-form->string form "(" ")")
+             form-types.table (complex-form->string form "{" "}")
+             form-types.sequence
+             (complex-form->string form "[" "]"))))
     form->string))
 
+(local form-methods
+  {:push (fn [form child-form]
+           (set form.length (+ form.length 1))
+           (tset form form.length child-form)
+           child-form)})
 
-(fn string-form [str] (create-form form-types.string (canonicalize str)))
+(local FORM-MT {:__index form-methods
+                :__tostring form->string
+                :__fennelview form->string})
+
+(fn create-form [form-type ...]
+  (let [form [...]]
+    (tset form :type form-type)
+    (tset form :length (select :# ...))
+    (setmetatable form FORM-MT)
+    form))
+
+(fn string-form [str]
+  (create-form form-types.string (canonicalize str)))
 (fn string-form-from-bytes [...] (string-form (string.char ...)))
-(fn string-form-from-keyword-string-bytes [colon ...] (create-form form-types.string (string.char ...)))
-(fn number-form-from-bytes [...] (create-form form-types.number (tonumber (string.char ...))))
+(fn string-form-from-keyword-string-bytes [colon ...]
+  (create-form form-types.string (string.char ...)))
+(fn number-form-from-bytes [...]
+  (create-form form-types.number (tonumber (string.char ...))))
 (fn symbol-form [str] (create-form form-types.symbol str))
 (fn symbol-form-from-bytes [...] (symbol-form (string.char ...)))
 (fn sequence-form [...] (create-form form-types.sequence ...))
 (fn table-form [...] (create-form form-types.table ...))
 (fn list-form [...] (create-form form-types.list ...))
 
-(fn create-form [form-type ...]
-  (let [form [form-type ...]]
-    (var len (select :# ...))
-    (tset form :length #len)
-    (tset form :push
-          (fn [child-form]
-            (set len (+ len 1))
-            (tset len child-form)
-            child-form))
-    form))
+(local stack-methods
+  {:push (fn [stack empty-form]
+           (set stack.length (+ stack.length 1))
+           (tset stack stack.length empty-form)
+           empty-form)
+   :pop (fn [stack]
+          (when (= stack.length 0)
+            (error "cannot pop stack with length 0"))
+          (let [form (. stack stack.length)]
+            (tset stack stack.length nil)
+            (set stack.length (- stack.length 1))
+            form))
+   :peek (fn [stack]
+           (when (not= stack.length 0)
+             (. stack stack.length)))})
+
+(local STACK-MT {:__index stack-methods})
 
 (fn create-stack []
-  (var len 0)
   (local stack [])
-  (fn push [empty-form]
-    (set len (+ len 1))
-    (tset stack new-len empty-form)
-    empty-form)
-  (fn pop []
-    (when (= len 0)
-      (error "cannot pop stack with length 0"))
-    (let [form (. stack len)]
-      (tset stack len nil)
-      (set len (- len 1))
-      form))
-  (fn peek []
-    (when (not= len 0)
-      (. stack len)))
-  {:length #len
-   : push
-   : pop})
+  (tset stack :length 0)
+  (setmetatable stack STACK-MT)
+  stack)
 
 (fn open-form-with-stack [stack bytes]
-  (stack.push
+  (stack:push
    (match bytes
      [40] (list-form)
      [91] (sequence-form)
      [123] (table-form))))
 
 (fn open-prefix-form-with-stack [stack bytes]
-  (stack.push
+  (stack:push
    (match bytes
      [35] (list-form (symbol-form :hashfn))
      [44] (list-form (symbol-form :unquote))
      [96] (list-form (symbol-form :quote)))))
 
 (fn close-form-with-stack [stack bytes]
-  (when (= (stack.length) 0)
-    (error "unexpected closing delimiter " (string.char (unpack bytes))))
-  (let [form (stack.pop)
-        expected-closer
-        (match form
-          [fts.list] ")"
-          [fts.sequence] "]"
-          [fts.table] "}")]
-    (let [closer (string.char (unpack bytes))]
-      (when (not= expected-closer closer)
-        (error (.. "unexpected closing delimiter " closer ", expected " expected-closer))))
+  (when (= stack.length 0)
+    (error (.. "unexpected closing delimiter "
+               (string.char (unpack bytes)))))
+  (let [form (stack:pop)
+        expected-closer (match form.type
+                          form-types.list ")"
+                          form-types.sequence "]"
+                          form-types.table "}")
+        closer (string.char (unpack bytes))]
+    (when (not= expected-closer closer)
+        (error (.. "unexpected closing delimiter " closer
+                   ", expected " expected-closer)))
     form))
+
+(local parser-states (enum expecting-form
+                           expecting-whitespace
+                           expecting-prefixed-form))
 
 (fn token-stream->form-stream [token-stream]
   (let [boxed-token-stream (box-tokens token-stream)
         tts token-types
         fts form-types
         stack (create-stack)
+        state-stack (create-stack)
+        prefixes-at []
         open-form (partial open-form-with-stack stack)
         open-prefix-form (partial open-prefix-form-with-stack stack)
         close-form (partial close-form-with-stack stack)]
+    (var needs-whitespace nil)
     (fn take-form []
       (var should-return nil)
       (var return-value nil)
-      (let [(token-type bytes) (boxed-token-stream)
-            dispatch
-            (fn [form]
-              (if (= (stack.length) 0)
-                  (do (set should-return true)
-                      (set return-value form))
-                  (let [parent-form (. stack (stack.length))]
-                    (parent-form.push form))))]
+      (fn dispatch [form]
+        (if (= stack.length 0)
+            (do (set should-return true)
+                (set return-value form))
+            (let [parent-form (stack:peek)
+                  pushed-form (parent-form:push form)]
+              (if (. prefixes-at stack.length)
+                  (do (tset prefixes-at stack.length nil)
+                      (let [further-form (stack:pop)]
+                        (dispatch further-form)))
+                  pushed-form))))
+      (let [(token-type bytes) (boxed-token-stream)]
+        (when (and needs-whitespace
+                 (not= token-type tts.whitespace)
+                 (not= token-type tts.comment)
+                 (not= token-type tts.closer))
+            (error (.. "expected whitespace, got "
+                       (. token-types token-type))))
         (match token-type
-          tts.symbol (dispatch (symbol-form-from-bytes (unpack bytes)))
-          tts.string (dispatch (string-form-from-bytes (unpack bytes)))
-          tts.keyword-string (dispatch (string-form-from-keyword-string-bytes (unpack bytes)))
-          tts.number (dispatch (number-form-from-bytes (unpack bytes)))
-
+          tts.symbol
+          (dispatch (symbol-form-from-bytes (unpack bytes)))
+          tts.string
+          (dispatch (string-form-from-bytes (unpack bytes)))
+          tts.keyword-string
+          (dispatch (string-form-from-keyword-string-bytes
+                     (unpack bytes)))
+          tts.number
+          (dispatch (number-form-from-bytes (unpack bytes)))
+          tts.whitespace nil
+          tts.comment nil
           tts.opener (open-form bytes)
-          tts.prefix (open-prefix-form bytes)
-          tts.closer (close-form bytes))
+          tts.prefix (do (tset prefixes-at (+ stack.length 1) true)
+                         (open-prefix-form bytes))
+          tts.closer (let [form (close-form bytes)] (dispatch form))
+          nil (do (set should-return true) (set return-value nil)))
+        (set needs-whitespace (and (not= token-type tts.opener)
+                                   (not= token-type tts.prefix)
+                                   (not= token-type tts.whitespace)
+                                   (not= token-type tts.comment)))
         (if should-return return-value (take-form))))
-    (fn take-form [token-stream stack stack-length form-lengths whitespace-since-dispatch prefixed-with prefixed-at]
-      (var should-return nil)
-      (var ret nil)
-      (local stack (or stack []))
-      (local form-lengths (or form-lengths []))
-      (var stack-length (or stack-length 0))
-      (var whitespace-since-dispatch whitespace-since-dispatch)
-      (var prefixed-with prefixed-with)
-      (let [tts token-types
-            (token-type bytes) (boxed-token-stream)
-            dispatch-form
-            (fn [form]
-              (let [form
-                    (if prefixed-with
-                        (let [pw prefixed-with]
-                          (set prefixed-with nil)
-                          (list-form (symbol-form pw) form))
-                        form)]
-                (if (= stack-length 0) (do (set ret form) (set should-return true))
-                    (let [current-form (. stack stack-length)
-                          form-length (. form-lengths stack-length)
-                          next-form-length (+ form-length 1)]
-                      (tset current-form next-form-length form)
-                      (tset form-lengths stack-length next-form-length)))))
-            begin-complex-form
-            (fn [bytes]
-              (let [new-stack-length (+ stack-length 1)
-                    empty-form (match bytes
-                                 [40] (list-form)
-                                 [91] (sequence-form)
-                                 [123] (table-form))]
-                (tset stack new-stack-length empty-form)
-                (tset form-lengths new-stack-length 1)
-                (set stack-length new-stack-length)))
-            end-complex-form
-            (fn [bytes]
-              (when (= stack-length 0)
-                (error (.. "unexpected closing delimiter " (string.char (unpack bytes)))))
-              (let [(expected-form-type expected-closer)
-                    (match bytes
-                      [41] (values form-types.list ")")
-                      [93] (values form-types.sequence "]")
-                      [125] (values form-types.table "}"))
-                    form (. stack stack-length)]
-                (when (not= expected-form-type (. form 1))
-                  (error (.. "unexpected closing delimiter " (string.char (unpack bytes)) ", expected " expected-closer)))
-                (let [finished-complex-form (. stack stack-length)]
-                  (tset stack stack-length nil)
-                  (set stack-length (- stack-length 1))
-                  (dispatch-form finished-complex-form))))
-            begin-prefix
-            (fn [bytes]
-              (set prefixed-with (match bytes [35] :hashfn [44] :unquote [96] :quote)))
-            ]
-        (match token-type
-          tts.symbol (dispatch-form (symbol-form-from-bytes (unpack bytes)))
-          tts.string (dispatch-form (string-form-from-bytes (unpack bytes)))
-          tts.keyword-string (dispatch-form (string-form-from-keyword-string-bytes (unpack bytes)))
-          tts.number (dispatch-form (number-form-from-bytes (unpack bytes)))
-          tts.whitespace (set whitespace-since-dispatch true)
-
-          tts.opener (begin-complex-form bytes)
-          tts.closer (end-complex-form bytes)
-          tts.prefix (begin-prefix bytes)
-          nil (set should-return true))
-        (if should-return ret
-            (take-form boxed-token-stream stack stack-length form-lengths whitespace-since-dispatch prefixed-with))))
-    (fn [] (take-form boxed-token-stream))))
+    take-form))
 
 (fn string->form-stream [str]
   (-> str
       stateful-string-stream
       byte-stream->token-stream
       token-stream->form-stream))
-
-;; (let [chunk-size 8000
-;;       f (assert (io.open "/home/benaiah/dev/fennel-the-book/fennel-the-book.fnl"))
-;;       token-stream (-> #(f:read chunk-size) chunk-stream->byte-stream byte-stream->token-stream)]
-
-;;   (for [i 1 10]
-;;      (-> [(token-stream)]
-;;          (#[(. token-types (. $ 1)) (. $ 2)])
-;;          fennelview
-;;          print)))
 #+END_SRC
+* CLI
+#+BEGIN_SRC fennel :noweb-ref cli
+(local parse-args
+  (do
+    (fn starts-with [str start] (= start (str:sub 1 (length start))))
+    (fn end-of-flags? [a] (= a :--))
+    (fn flag? [f] (and f (not (end-of-flags? f))
+                       (> (length f) 1) (starts-with f :-)))
+    (fn long-flag? [a] (and (flag? a) (starts-with a :--)))
+    (fn long-flag-name [a] (string.sub a 3))
+    (fn short-flag? [a] (and (flag? a) (not (long-flag? a))))
+    (fn short-flag-flags [a]
+      (let [ret []]
+        (var ret-i 1)
+        (each [c (-> a (string.sub 2) (string.gmatch "."))]
+          (tset ret ret-i c)
+          (set ret-i (+ ret-i 1)))
+        ret))
+    (fn flag-and-value [f]
+      (when (flag? f) (string.match f "^-%-?([^=]+)=(.*)$")))
+    (fn parse-args-1 [opts opts-i flags? a b ...]
+      (if (not a) opts
+          ;; long flags
+          (and flags? a (long-flag? a))
+          (let [(f v) (flag-and-value a)]
+            (if f ;; long flag with interior value
+                (do (tset opts f (if (= v nil) "" v))
+                    (parse-args-1 opts opts-i flags? b ...))
+                ;; long flag with value
+                (and b (not (flag? b)))
+                (do (tset opts (long-flag-name a) b)
+                    (parse-args-1 opts opts-i flags? ...))
+                ;; long flag without value
+                (do (tset opts (long-flag-name a) "")
+                    (parse-args-1 opts opts-i flags? b ...))))
+          ;; short flags
+          (and flags? a (short-flag? a))
+          (let [(f v) (flag-and-value a)]
+            (if f ;; short flag with interior value
+                (do (each [ff (string.gmatch f ".")]
+                      (tset opts ff ""))
+                    (tset opts f (if (= v nil) "" v))
+                    (parse-args-1 opts opts-i flags? b ...))
+                (let [flags (short-flag-flags a)]
+                  (each [_ f (ipairs flags)] (tset opts f ""))
+                  (if (and b (not (flag? b)))
+                      (do (tset opts (. flags (length flags)) b)
+                          (parse-args-1 opts opts-i flags? ...))
+                      (parse-args-1 opts opts-i flags? b ...)))))
+          ;; no more flags
+          (and flags? a (end-of-flags? a))
+          (parse-args-1 opts opts-i false b ...)
+          ;; positional arg
+          (do (tset opts opts-i a)
+              (parse-args-1 opts (+ opts-i 1) flags? b ...))))
+    (fn parse-args [...]
+      (parse-args-1 {} 1 true ...))))
+
+(fn print-token [t]
+  (-> [(. token-types (. t 1)) (string.char (select 2 (unpack t)))]
+      fennelview
+      print))
+
+(fn file-stream [path chunk-size]
+  (let [cs (or chunk-size 8000)
+        f (if (= path :-) io.stdin (assert (io.open path)))]
+    (values #(f:read cs) #(f:close))))
+
+(fn tokenize-file [path chunk-size]
+  (let [(fs close-file) (file-stream path chunk-size)
+        token-stream (-> fs
+                         chunk-stream->byte-stream
+                         byte-stream->token-stream)]
+    (each [t #(let [t [(token-stream)]] (when (. t 1) t))]
+      (print-token t))
+    (close-file)))
+
+(fn formize-file [path chunk-size]
+  (let [(fs close-file) (file-stream path chunk-size)
+        form-stream (-> fs
+                        chunk-stream->byte-stream
+                        byte-stream->token-stream
+                        token-stream->form-stream)]
+    (each [f form-stream]
+      (print (form->string f)))
+    (close-file)))
+
+(fn help [] (print "
+Fennel - The Book
+
+    --help, -h                  display this message
+    --tokenize PATH, -t PATH    tokenize a file
+    --formize PATH, -f PATH     parse and re-print a file
+"))
+
+(when (not= 0 (select :# ...))
+  (let [options (parse-args ...)]
+    (match options
+      {: help} (help)
+      {: h} (help)
+
+      {:tokenize path :chunk-size ?chunk-size}
+      (tokenize-file path (tonumber ?chunk-size))
+      {:t path :chunk-size ?chunk-size}
+      (tokenize-file path (tonumber ?chunk-size))
+      {:tokenize "" 1 path :chunk-size ?chunk-size}
+      (tokenize-file path (tonumber ?chunk-size))
+      {:t "" 1 path :chunk-size ?chunk-size}
+      (tokenize-file path (tonumber ?chunk-size))
+
+      {:formize path :chunk-size ?chunk-size}
+      (formize-file path (tonumber ?chunk-size))
+      {:f path :chunk-size ?chunk-size}
+      (formize-file path (tonumber ?chunk-size))
+      {:formize "" 1 path :chunk-size ?chunk-size}
+      (formize-file path (tonumber ?chunk-size))
+      {:f "" 1 path :chunk-size ?chunk-size}
+      (formize-file path (tonumber ?chunk-size)))))
+#+END_SRC
+
 * COMMENT Tools
 ** TODO ~fennel-fmt~
 #+BEGIN_SRC fennel
@@ -1944,7 +2031,6 @@ specific files we wish to commit:
 
 * Output                                                           :noexport:
 #+BEGIN_SRC fennel :noweb tangle :tangle fennel-the-book.fnl
-
 (global unpack (or unpack table.unpack))
 ;; (macro → [...] `(-> ,...))
 
@@ -1963,6 +2049,8 @@ specific files we wish to commit:
 <<tokenizer>>
 
 <<parser>>
+
+<<cli>>
 
 {:streams {: stateful-string-stream : create-cursor : create-string-cursor : map-stream}
  :readers {: whitespace-reader : comment-reader : symbol-reader : keyword-string-reader : number-reader : string-reader}
