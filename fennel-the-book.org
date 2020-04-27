@@ -75,14 +75,26 @@ printf "output:   $(lua compiled.lua)"
 : output:   hello world!
 
 ** Test file header                                               :noexport:
-#+BEGIN_SRC fennel :tangle test.fnl
-((require :busted.runner))
+#+BEGIN_SRC fennel :noweb-ref tests-header
+(local lu (require :lib.luaunit.luaunit))
+(local {:assertEquals assert-equals
+        :assertError assert-error
+        :assertErrorMsgContains assert-error-msg} lu)
 
-(global describe describe)
-(global assert assert)
-(global it it)
+;; LuaUnit expects tests to be in a global variable starting with
+;; "test".
+(global tests {})
+
+;; We don't want to require tests to start with "test" when they're
+;; already contained in the "tests" global. Instead, just use every
+;; function in the tests table as a test.
+(set lu.LuaUnit.isMethodTestName #true)
 
 (global unpack (or unpack table.unpack))
+#+END_SRC
+
+#+BEGIN_SRC fennel :noweb-ref tests-footer
+(os.exit (lu.LuaUnit.run))
 #+END_SRC
 
 ** TODO COMMENT Self-hosting
@@ -119,7 +131,7 @@ successively:
 #+BEGIN_SRC fennel :results output
 (fn string-bytes [str]
   (var index 1)
-  #(let [r (: str :byte index)]
+  #(let [r (str:byte index)]
      (set index (+ index 1))
      r))
 
@@ -147,8 +159,8 @@ stateful stream:
 (fn file-chunks [filename]
   (local f (if filename (io.open filename :r)
                io.stdin))
-  #(let [chunk (: f :read chunk-size)]
-     (when (not chunk) (: f :close))
+  #(let [chunk (f:read chunk-size)]
+     (when (not chunk) (f:close))
      chunk))
 #+END_SRC
 
@@ -201,7 +213,7 @@ function that creates a stateful stream from a string:
 #+BEGIN_SRC fennel :noweb-ref stateful-string-stream
 (fn stateful-string-stream [str]
   (var index 1)
-  #(let [r (: str :byte index)]
+  #(let [r (str:byte index)]
      (set index (+ index 1))
      r))
 #+END_SRC
@@ -218,22 +230,21 @@ the bytes of a string with the following code:
 ;; EXAMPLE - not a part of the source code!
 (local {:streams {: stateful-string-stream}} (require :fennel-the-book))
 (each [byte (stateful-string-stream "abc")]
-  (: io.stdout :write (.. byte " ")))
+  (io.stdout:write (.. byte " ")))
 #+END_SRC
 
 #+RESULTS:
 : 97 98 99 nil
 
 *** Tests                                                        :noexport:
-#+BEGIN_SRC fennel :tangle test.fnl
-(describe "stateful-string-stream"
-  #(let [{:streams {: stateful-string-stream}} (require :fennel-the-book)]
-     (it "should stream a string"
-       #(let [the-stream (stateful-string-stream "abcd")]
-          (assert.are.equal 97 (the-stream))
-          (assert.are.equal 98 (the-stream))
-          (assert.are.equal 99 (the-stream))
-          (assert.are.equal 100 (the-stream))))))
+#+BEGIN_SRC fennel :noweb-ref tests-stateful-string-stream
+(fn tests.stateful-string-stream []
+  (let [{:streams {: stateful-string-stream}} (require :fennel-the-book)
+        the-stream (stateful-string-stream "abcd")]
+    (assert-equals 97 (the-stream))
+    (assert-equals 98 (the-stream))
+    (assert-equals 99 (the-stream))
+    (assert-equals 100 (the-stream))))
 #+END_SRC
 
 ** COMMENT Transforming streams - ~map~, ~filter~, ~reduce~
@@ -388,7 +399,7 @@ some sample code:
     (tset rows i new-row))
 
   (print-table
-   rows {:column-headers [:Current "" "Peek 1" "" "Peek 2"]
+   rows {:column-headers ["Current" "" "Peek 1" "" "Peek 2"]
          :column-groups [:/ :> :< :> :< "" :>]
          }))
 #+END_SRC
@@ -418,29 +429,28 @@ a string:
 (fn create-string-cursor [s] (-> s stateful-string-stream create-cursor))
 #+END_SRC
 
-*** Tests                                                        :noexport:
-#+BEGIN_SRC fennel :tangle test.fnl
-(describe
- "create-cursor"
- #(let [{:streams {: create-string-cursor}} (require :fennel-the-book)
+*** Tests                                                       :noexport:
+#+BEGIN_SRC fennel :noweb-ref tests-create-string-cursor
+(let [{:streams {: create-string-cursor}} (require :fennel-the-book)
         fennelview (require :fennelview)
         sample-contents "abcdefghijklmnopqrstuvwxyz"]
-    (it "should stream the alphabet"
-        #(let [cursor (create-string-cursor sample-contents)
+  (fn tests.create-cursor-streams-alphabet []
+    (let [cursor (create-string-cursor sample-contents)
                result []]
            (var result-i 1)
            (each [byte cursor.take]
              (tset result result-i (string.char byte))
              (set result-i (+ result-i 1)))
-           (assert.are.equal sample-contents (table.concat result))))
-    (it "should allow peeking without changing the taken bytes"
-        #(let [cursor (create-string-cursor sample-contents)]
-           (assert.are.equal 97 (cursor.peek))
-           (assert.are.same [97 98] [(cursor.peek 2)])
-           (assert.are.same [98 99 100] [(cursor.peek 2 3)])
-           (assert.are.equal 97 (cursor.take))
-           (assert.are.equal 98 (cursor.peek))
-           (assert.are.equal 98 (cursor.take))))))
+           (assert-equals sample-contents (table.concat result))))
+  (fn tests.create-cursor-allows-peeking []
+    "create-cursor should allow peeking without changing the taken bytes"
+    (let [cursor (create-string-cursor sample-contents)]
+      (assert-equals 97 (cursor.peek))
+      (assert-equals [97 98] [(cursor.peek 2)])
+      (assert-equals [98 99 100] [(cursor.peek 2 3)])
+      (assert-equals 97 (cursor.take))
+      (assert-equals 98 (cursor.peek))
+      (assert-equals 98 (cursor.take)))))
 #+END_SRC
 
 ** COMMENT Child cursors
@@ -456,7 +466,7 @@ a string:
     {: peek : peek-at : take}))
 #+END_SRC
 
-*** Tests                                                        :noexport:
+*** COMMENT Tests                                                        :noexport:
 #+BEGIN_SRC fennel :tangle test.fnl
 (describe "create-child-cursor"
   (it "should allow taking from a child cursor" #(let [] nil)))
@@ -725,8 +735,8 @@ above.
   read.
 - ~read-bytes~ - takes a cursor, which it advances over the next token,
   returning the bytes of that token.
-- ~read-string~ - advances the reader over the next token and returns it
-  as a string.
+- ~read-string~ - takes a cursor which it advances over the next token,
+  returning the token as a string.
 
 We can use a function which takes a ~readn~ function as an argument to
 generate a reader with all the functions just described :
@@ -756,22 +766,21 @@ This allows us to construct readers as follows:
 #+END_SRC
 
 *** Tests                                                        :noexport:
-#+BEGIN_SRC fennel :tangle test.fnl
-(describe "compose-tagged-readers"
-  #(let [{:streams {: stateful-string-stream : create-cursor}
-          :readers {: whitespace-reader : symbol-reader : keyword-string-reader}
-         : compose-tagged-readers} (require :fennel-the-book)]
-     (it "should compose readers"
-       #(let [composed-reader (compose-tagged-readers 1 whitespace-reader
-                                                      2 symbol-reader
-                                                      3 keyword-string-reader)
-              s " sym :keyword-string sym-2 :another-keyword-string"
-              cursor (create-cursor (stateful-string-stream s))]
-          (assert.are.same [1 1] [(composed-reader.readn-tagged cursor.peek)])
-          (assert.are.same [32] [(composed-reader.read-bytes cursor)])
-          (assert.are.same [2 115 121 109] [(composed-reader.read-bytes-tagged cursor)])
-          (assert.are.same [1 " "] [(composed-reader.read-string-tagged cursor)])
-          (assert.are.same [3 ":keyword-string"] [(composed-reader.read-string-tagged cursor)])))))
+#+BEGIN_SRC fennel :noweb-ref tests-compose-tagged-readers
+(let [{:streams {: stateful-string-stream : create-cursor}
+       :readers {: whitespace-reader : symbol-reader : keyword-string-reader}
+       : compose-tagged-readers} (require :fennel-the-book)]
+  (fn tests.compose-tagged-readers []
+    (let [composed-reader (compose-tagged-readers 1 whitespace-reader
+                                                  2 symbol-reader
+                                                  3 keyword-string-reader)
+          s " sym :keyword-string sym-2 :another-keyword-string"
+          cursor (create-cursor (stateful-string-stream s))]
+      (assert-equals [1 1] [(composed-reader.readn-tagged cursor.peek)])
+      (assert-equals [32] [(composed-reader.read-bytes cursor)])
+      (assert-equals [2 115 121 109] [(composed-reader.read-bytes-tagged cursor)])
+      (assert-equals [1 " "] [(composed-reader.read-string-tagged cursor)])
+      (assert-equals [3 ":keyword-string"] [(composed-reader.read-string-tagged cursor)]))))
 #+END_SRC
 
 *** TODO COMMENT Test/provide UTF-8 aware string reconstitution
@@ -820,23 +829,26 @@ as any of the following bytes:
 #+END_SRC
 
 **** Tests                                                      :noexport:
-#+BEGIN_SRC fennel :tangle test.fnl
-(describe "whitespace reader"
-  #(let [{:streams {: stateful-string-stream : create-cursor}
-          :readers {: whitespace-reader}} (require :fennel-the-book)
-         create-string-cursor #(-> $ stateful-string-stream create-cursor)
-         read-whitespace-string #(-> $ create-string-cursor whitespace-reader.read-string)]
-     (it "should readn a string with just whitespace"
-       #(let [s " " cursor (create-string-cursor s)]
-          (assert.are.equal 1 (whitespace-reader.readn cursor.peek))))
-     (it "should read a string with just whitespace"
-       #(let [s " 	\n"] (assert.are.equal s (read-whitespace-string s))))
-     (it "should read only the beginning of a string that starts with whitespace"
-       #(let [s "  abc"] (assert.are.equal "  " (read-whitespace-string s))))
-     (it "should return 0 for a string that doesn't start with whitespace"
-       #(let [s "abc  " cursor (create-string-cursor s)]
-          (assert.are.equal 0 (whitespace-reader.readn cursor.peek))
-          (assert.are.equal "" (read-whitespace-string s))))))
+#+BEGIN_SRC fennel :noweb-ref tests-whitespace-reader
+(let [{:streams {: stateful-string-stream : create-cursor}
+       :readers {: whitespace-reader}} (require :fennel-the-book)
+      create-string-cursor #(-> $ stateful-string-stream create-cursor)
+      read-whitespace-string #(-> $ create-string-cursor whitespace-reader.read-string)]
+  (fn tests.whitespace-reader-readn-whitespace-string []
+    "whitespace reader should readn a string with just whitespace"
+    (let [s " " cursor (create-string-cursor s)]
+         (assert-equals 1 (whitespace-reader.readn cursor.peek))))
+  (fn tests.whitespace-reader-read-whitespace-string []
+    "whitespace reader should read a string with just whitespace"
+    (let [s " 	\n"] (assert-equals s (read-whitespace-string s))))
+  (fn tests.whitespace-reader-read-whitespace-only []
+    "whitespace reader should read only the beginning of a string that starts with whitespace"
+    (let [s "  abc"] (assert-equals "  " (read-whitespace-string s))))
+  (fn tests.whitespace-reader-read-non-whitespace-string []
+    "whitespace reader should return 0 for a string that doesn't start with whitespace"
+    (let [s "abc  " cursor (create-string-cursor s)]
+       (assert-equals 0 (whitespace-reader.readn cursor.peek))
+       (assert-equals "" (read-whitespace-string s)))))
 #+END_SRC
 
 *** Comment reader
@@ -857,18 +869,19 @@ semicolon (value 59) and then get all the bytes until the next newline
 #+END_SRC
 
 **** Tests                                                      :noexport:
-#+BEGIN_SRC fennel :tangle test.fnl
-(describe "comment reader"
-  #(let [{:streams {: stateful-string-stream : create-cursor}
-          :readers {: comment-reader}} (require :fennel-the-book)
-         read-comment-string
-         #(-> $ stateful-string-stream create-cursor comment-reader.read-string)]
-     (it "should read a string with just a comment"
-       #(let [s "; this is a comment"]
-         (assert.are.equal s (read-comment-string s))))
-     (it "should read only the beginning of a string that starts with a comment"
-       #(let [s "; this is a comment\n:no-longer-a-comment"]
-          (assert.are.equal "; this is a comment" (read-comment-string s))))))
+#+BEGIN_SRC fennel :noweb-ref tests-comment-reader
+(let [{:streams {: stateful-string-stream : create-cursor}
+       :readers {: comment-reader}} (require :fennel-the-book)
+      read-comment-string
+      #(-> $ stateful-string-stream create-cursor comment-reader.read-string)]
+  (fn tests.comment-reader-read-comment []
+    "comment reader should read a string with just a comment"
+    (let [s "; this is a comment"]
+      (assert-equals s (read-comment-string s))))
+  (fn tests.comment-reader-read-string-starting-with-comment []
+    "comment reader should read only the beginning of a string that starts with a comment"
+    (let [s "; this is a comment\n:no-longer-a-comment"]
+      (assert-equals "; this is a comment" (read-comment-string s)))))
 #+END_SRC
 
 *** Symbol reader
@@ -947,26 +960,29 @@ easily:
 #+END_SRC
 
 **** Tests                                                      :noexport:
-#+BEGIN_SRC fennel :tangle test.fnl
-(describe "symbol reader"
-  #(let [{:streams {: create-string-cursor}
-          :readers {: symbol-reader}} (require :fennel-the-book)
-         read-symbol-string
-         #(-> $ create-string-cursor symbol-reader.read-string)]
-     (it "should read a string with just a symbol"
-       #(let [s "symbol"]
-         (assert.are.equal s (read-symbol-string s))))
-     (it "should read only the beginning of a string that starts with a comment"
-       #(let [s "a-symbol ; shouldn't read any more"]
-          (assert.are.equal "a-symbol" (read-symbol-string s))))
-     (it "shouldn't read a symbol that begins with a digit"
-       #(let [s "0abc" cursor (create-string-cursor s)]
-          (assert.are.equal 0 (symbol-reader.readn cursor.peek))
-          (assert.are.equal "" (read-symbol-string s))))
-     (it "should read and recreate UTF-8 symbol"
-         #(let [s "コンニチハ" cursor (create-string-cursor s)]
-            (assert.are.equal 15 (symbol-reader.readn cursor.peek))
-            (assert.are.equal "コンニチハ" (read-symbol-string s))))))
+#+BEGIN_SRC fennel :noweb-ref tests-symbol-reader
+(let [{:streams {: create-string-cursor}
+       :readers {: symbol-reader}} (require :fennel-the-book)
+      read-symbol-string
+      #(-> $ create-string-cursor symbol-reader.read-string)]
+  (fn tests.symbol-reader-read-symbol []
+    "symbol reader should read a string with just a symbol"
+    (let [s "symbol"]
+      (assert-equals s (read-symbol-string s))))
+  (fn tests.symbol-reader-read-string-starting-with-symbol []
+    "symbol reader should read only the beginning of a string that starts with a symbol"
+    (let [s "a-symbol ; shouldn't read any more"]
+      (assert-equals "a-symbol" (read-symbol-string s))))
+  (fn tests.symbol-reader-wont-read-digit []
+    "symbol reader shouldn't read a symbol that begins with a digit"
+    (let [s "0abc" cursor (create-string-cursor s)]
+      (assert-equals 0 (symbol-reader.readn cursor.peek))
+      (assert-equals "" (read-symbol-string s))))
+  (fn tests.symbol-reader-read-utf8-symbol []
+    "symbol reader should read and recreate UTF-8 symbol"
+    (let [s "コンニチハ" cursor (create-string-cursor s)]
+      (assert-equals 15 (symbol-reader.readn cursor.peek))
+      (assert-equals "コンニチハ" (read-symbol-string s)))))
 #+END_SRC
 
 *** Keyword string reader
@@ -986,17 +1002,16 @@ just defined to collect the string after skipping the initial ~:~ character.
 (local keyword-string-reader (create-reader (fn [peek] (read-keyword-string peek))))
 #+END_SRC
 
-**** Test                                                       :noexport:
-
-#+BEGIN_SRC fennel :tangle test.fnl
-(describe "keyword string reader"
-  #(let [{:streams {: create-string-cursor}
-          :readers {: keyword-string-reader}} (require :fennel-the-book)
-         read-keyword-string-string
-         #(-> $ create-string-cursor keyword-string-reader.read-string)]
-     (it "should read a keyword string"
-       #(let [s ":keyword-string"]
-          (assert.are.equal s (read-keyword-string-string s))))))
+**** Tests                                                      :noexport:
+#+BEGIN_SRC fennel :noweb-ref tests-keyword-string-reader
+(let [{:streams {: create-string-cursor}
+       :readers {: keyword-string-reader}} (require :fennel-the-book)
+      read-keyword-string-string
+      #(-> $ create-string-cursor keyword-string-reader.read-string)]
+  (fn tests.keyword-string-reader []
+    "keyword string reader should read a keyword string"
+    (let [s ":keyword-string"]
+      (assert-equals s (read-keyword-string-string s)))))
 #+END_SRC
 
 *** String reader
@@ -1042,25 +1057,30 @@ as follows:
 #+END_SRC
 
 **** Tests                                                      :noexport:
-#+BEGIN_SRC fennel :tangle test.fnl
-(describe "string reader"
-  #(let [{:streams {: create-string-cursor}
-          :readers {: string-reader}} (require :fennel-the-book)
-         read-string #(-> $ create-string-cursor string-reader.read-string)]
-     (it "should parse a normal string containing whitespace"
-       #(let [s "\"just some old regular string \r\n with some whitespace in\""]
-          (assert.are.equal s (read-string s))))
-     (it "should parse a string with a backslash escape"
-       #(let [s "\" \\\\ \""] (assert.are.equal s (read-string s))))
-     (it "should parse a string with an escaped quote"
-       #(let [s "\" \\\" \""] (assert.are.equal s (read-string s))))
-     (it "should parse a string with a backslash followed by an escaped quote"
-       #(let [s "\" \\\\\\\" \""] (assert.are.equal s (read-string s))))
-     (it "should stop parsing at the first unescaped quote"
-       #(let [s "\"here is the string\" and here is the suffix"]
-          (assert.are.equal "\"here is the string\"" (read-string s))))
-     (it "should error on unterminated string"
-       #(assert.has.error #(read-string "\"abcdef") "unterminated string"))))
+#+BEGIN_SRC fennel :noweb-ref tests-string-reader
+(let [{:streams {: create-string-cursor}
+       :readers {: string-reader}} (require :fennel-the-book)
+      read-string #(-> $ create-string-cursor string-reader.read-string)]
+  (fn tests.string-reader-read-string []
+    "string reader should parse a normal string containing whitespace"
+    (let [s "\"just some old regular string \r\n with some whitespace in\""]
+      (assert-equals s (read-string s))))
+  (fn tests.string-reader-read-string-only []
+    "string reader should stop parsing at the first unescaped quote"
+    (let [s "\"here is the string\" and here is the suffix"]
+      (assert-equals "\"here is the string\"" (read-string s))))
+  (fn tests.string-reader-read-string-with-escaped-backslash []
+    "string reader should parse a string with a backslash escape"
+    (let [s "\" \\\\ \""] (assert-equals s (read-string s))))
+  (fn tests.string-reader-read-string-with-escaped-quote []
+    "string reader should parse a string with an escaped quote"
+    (let [s "\" \\\" \""] (assert-equals s (read-string s))))
+  (fn tests.string-reader-read-string-with-backslash-and-escaped-quote []
+    "string reader should parse a string with a backslash followed by an escaped quote"
+    (let [s "\" \\\\\\\" \""] (assert-equals s (read-string s))))
+  (fn tests.string-reader-read-unterminated-string []
+    "string reader should error on unterminated string"
+    (assert-error-msg "unterminated string" #(read-string "\"abcdef"))))
 #+END_SRC
 
 *** Number Reader
@@ -1263,47 +1283,61 @@ those explicitly listed will result in an error):
 #+END_SRC
 
 **** Tests                                                      :noexport:
-#+BEGIN_SRC fennel :tangle test.fnl
-(describe "number reader"
-  #(let [{:streams {: stateful-string-stream : create-cursor}
-          :readers {: number-reader}} (require :fennel-the-book)
-         read-number #(-> $ stateful-string-stream create-cursor (number-reader.read-string error))]
-     (it "should parse a number"
-       #(let [s "12345"] (assert.are.equal s (read-number s))))
-     (it "should parse a negative number"
-       #(let [s "-12345"] (assert.are.equal s (read-number s))))
-     (it "should stop parsing a number when it ends"
-       #(assert.are.equal "12345" (read-number "12345 some words")))
-     (it "should parse a number with a decimal point"
-       #(let [s "123.45"] (assert.are.equal s (read-number s))))
-     (it "should parse a negative number"
-       #(let [s "-123.45"] (assert.are.equal s (read-number s))))
-     (it "should parse a hexadecimal number"
-       #(let [s "0xabc123"] (assert.are.equal s (read-number s))))
-     (it "should parse a hexadecimal number with a decimal point"
-       #(let [s "0xabc123.def456"] (assert.are.equal s (read-number s) )))
-     (it "should parse a negative hexadecimal number with a decimal point"
-       #(let [s "-0xabc123.def456"] (assert.are.equal s (read-number s))))
-     (it "should parse a number with an exponent"
-       #(let [s "1.514e10"] (assert.are.equal s (read-number s))))
-     (it "should parse a number with a negative exponent"
-       #(let [s "1.514e-10"] (assert.are.equal s (read-number s))))
-
-     (it "should not allow non-digits"
-       #(assert.has.error #(read-number "123z456") "invalid char in number: z\tchar value: 122"))
-     (it "should not a allow a number to end with a hexadecimal indicator"
-       #(assert.has.error #(read-number "0x") "unexpected end of number following hex indicator char"))
-     (it "should not allow a number to end with an exponent indicator"
-       #(assert.has.error #(read-number "1.514e") "unexpected end of number following exponent char"))
-     (it "should not allow a number to end with an exponent hyphen"
-       #(assert.has.error #(read-number "1.514e-") "unexpected end of number following exponent hyphen char"))
-     (it "should not allow a number to contain two decimal points"
-       #(assert.has.error #(read-number "1.514.625") "unexpected second decimal point"))
-     (it "should not allow a hexadecimal number to contain two decimal points"
-       #(assert.has.error #(read-number "0xa1.b2.c3") "unexpected second decimal point"))
-     (it "should not allow a hex indicator character to come in the middle of a number"
-       #(assert.has.error #(read-number "01xabc2") "unexpected hex indicator char following digit"))
-     ))
+#+BEGIN_SRC fennel :noweb-ref tests-number-reader
+(let [{:streams {: stateful-string-stream : create-cursor}
+       :readers {: number-reader}} (require :fennel-the-book)
+      read-number #(-> $ stateful-string-stream create-cursor (number-reader.read-string error))]
+  (fn tests.number-reader []
+    "number reader should parse a number"
+    (let [s "12345"] (assert-equals s (read-number s))))
+  (fn tests.number-reader-negative []
+    "number reader should parse a negative number"
+    (let [s "-12345"] (assert-equals s (read-number s))))
+  (fn tests.number-reader-number-only []
+    "number reader should stop parsing a number when it ends"
+    (assert-equals "12345" (read-number "12345 some words")))
+  (fn tests.number-reader-with-decimal []
+    "number reader should parse a number with a decimal point"
+    (let [s "123.45"] (assert-equals s (read-number s))))
+  (fn tests.number-reader-negative-with-decimal []
+    "number reader should parse a negative number with a decimal point"
+    (let [s "-123.45"] (assert-equals s (read-number s))))
+  (fn tests.number-reader-hex []
+    "number reader should parse a hexadecimal number"
+    (let [s "0xabc123"] (assert-equals s (read-number s))))
+  (fn tests.number-reader-hex-with-decimal []
+    "number reader should parse a hexadecimal number with a decimal point"
+    (let [s "0xabc123.def456"] (assert-equals s (read-number s) )))
+  (fn tests.number-reader-negative-hex-with-decimal []
+    "number reader should parse a negative hexadecimal number with a decimal point"
+    (let [s "-0xabc123.def456"] (assert-equals s (read-number s))))
+  (fn tests.number-reader-exp []
+    "number reader should parse a number with an exponent"
+    (let [s "1.514e10"] (assert-equals s (read-number s))))
+  (fn tests.number-reader-negative-exp []
+    "number reader should parse a number with a negative exponent"
+    (let [s "1.514e-10"] (assert-equals s (read-number s))))
+  (fn tests.number-reader-no-non-digits []
+    "number reader should not allow non-digits"
+    (assert-error-msg "invalid char in number: z\tchar value: 122" #(read-number "123z456")))
+  (fn tests.number-reader-no-ending-with-hex-indicator []
+    "number reader should not a allow a number to end with a hexadecimal indicator"
+    (assert-error-msg "unexpected end of number following hex indicator char" #(read-number "0x")))
+  (fn tests.number-reader-no-ending-with-exp-indicator []
+    "number reader should not allow a number to end with an exponent indicator"
+    (assert-error-msg "unexpected end of number following exponent char" #(read-number "1.514e")))
+  (fn tests.number-reader-no-ending-with-exp-hyphen []
+    "number reader should not allow a number to end with an exponent hyphen"
+    (assert-error-msg "unexpected end of number following exponent hyphen char" #(read-number "1.514e-")))
+  (fn tests.number-reader-only-one-decimal-point []
+    "number reader should not allow a number to contain two decimal points"
+    (assert-error-msg "unexpected second decimal point" #(read-number "1.514.625")))
+  (fn tests.number-reader-only-one-hex-decimal-point []
+    "number reader should not allow a hexadecimal number to contain two decimal points"
+    (assert-error-msg "unexpected second decimal point" #(read-number "0xa1.b2.c3")))
+  (fn tests.number-reader-no-hex-indicator-after-start []
+    "number reader should not allow a hex indicator character to come in the middle of a number"
+    (assert-error-msg "unexpected hex indicator char following digit" #(read-number "01xabc2"))))
 #+END_SRC
 
 **** DONE COMMENT use an integer enum instead of a string for the reader state
@@ -1492,36 +1526,35 @@ Now that we have that function, we can
                             tts.symbol symbol-reader)))
 
 (fn take-token [cursor]
-  (let [n (fennel-tagged-reader.readn cursor.peek)]
-    (if (> n 0) (fennel-tagged-reader.read-bytes-tagged cursor)
-        (let [(b1 b2 b3) (cursor.peek 3)]
-          (error (.. "unrecognized byte sequence [" b1 " " b2 " " b3 "] "
-                     "\"" (string.char b1 b2 b3) "\""))))))
+  (when (cursor.peek)
+    (let [n (fennel-tagged-reader.readn cursor.peek)]
+      (if (> n 0) (fennel-tagged-reader.read-bytes-tagged cursor)
+          (let [(b1 b2 b3) (cursor.peek 3)]
+            (error (.. "unrecognized byte sequence [" b1 " " b2 " " b3 "] "
+                       "\"" (string.char b1 b2 b3) "\"")))))))
 
 (fn chunk-stream->byte-stream [chunk-stream]
   (var chunk "")
   (var index 1)
   (var done false)
-  (values
-   (fn [parser-state]
-     (if done nil
+  (fn [...]
+    (if done nil
 
-         (<= index (length chunk))
-         (let [byte (chunk:byte index)]
-           (set index (+ index 1))
-           byte)
+        (<= index (length chunk))
+        (let [byte (chunk:byte index)]
+          (set index (+ index 1))
+          byte)
 
-         (do (set chunk (chunk-stream parser-state))
-             (if (or (not chunk) (= chunk ""))
-                 (set done true)
+        (do (set chunk (chunk-stream ...))
+            (if (or (not chunk) (= chunk ""))
+                (set done true)
 
-                 (do (set index 2)
-                     (chunk:byte 1))))))
-   (fn [] (set chunk ""))))
+                (do (set index 2)
+                    (chunk:byte 1)))))))
 
 (fn byte-stream->token-stream [bytes-stream]
   (let [cursor (create-cursor bytes-stream)]
-    (fn [] (when (cursor.peek) (take-token cursor)))))
+    #(take-token cursor)))
 #+END_SRC
 
 *** DONE COMMENT Rewrite tokenizer to use ~compose-readers~
@@ -1555,7 +1588,7 @@ Now that we have that function, we can
         (assert (load code filename :t environment)))))
 
 (fn canonicalize [str]
-  (let [formatted (: str :gsub "[\1-\31]" #(.. "\\" (: $1 :byte)))
+  (let [formatted (str:gsub "[\1-\31]" #(.. "\\" ($1:byte)))
         load-fn (load-code (: "return %s" :format formatted) nil)]
     (load-fn)))
 
@@ -2023,9 +2056,11 @@ For the ~.gitignore~, we start by ignoring everything then whitelist the
 specific files we wish to commit:
 
 #+BEGIN_SRC text :tangle .gitignore
-*
+,*
 !fennel-the-book.org
 !makefile
+!lib
+!lib/*
 !.gitignore
 #+END_SRC
 
@@ -2064,3 +2099,25 @@ specific files we wish to commit:
  : form->string
  }
 #+END_SRC
+* Test output                                                      :noexport:
+#+BEGIN_SRC fennel :noweb tangle :tangle test.fnl
+<<tests-header>>
+
+<<tests-stateful-string-stream>>
+<<tests-create-string-cursor>>
+<<tests-compose-tagged-readers>>
+<<tests-whitespace-reader>>
+<<tests-comment-reader>>
+<<tests-symbol-reader>>
+<<tests-keyword-string-reader>>
+<<tests-string-reader>>
+<<tests-number-reader>>
+
+<<tests-footer>>
+#+END_SRC
+
+* Emacs local variables
+# Local Variables:
+# eval: (firestarter-mode)
+# firestarter: "make tangle"
+# End:
